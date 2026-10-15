@@ -1,0 +1,50 @@
+# Non-secret settings. Secrets and per-deployment values come from the environment (.env).
+
+sources:
+  openalex: {min_interval_s: 0.11}   # ~9 requests/s; use OPENALEX_API_KEY for an own quota
+  crossref: {min_interval_s: 0.25}
+  arxiv: {min_interval_s: 3.1}       # arXiv asks for at most 1 request per 3 seconds
+  dblp: {min_interval_s: 1.0}
+
+seed_finder:
+  queries: 5                         # search queries the LLM derives from the topic
+  per_query: {openalex: 50, arxiv: 25, crossref: 25, dblp: 25}
+  abstract_chars_in_prompt: 1200     # abstract length shown to the seed picker
+
+embedding:
+  batch_size: 64
+  store_dtype: float16               # 4096-dim vectors: 8 KB each instead of 16 KB
+
+null:
+  sample_size: 2000                  # random papers for the background distribution
+  scope: field                       # field: seeds' most common OpenAlex subfield; global: no filter
+  random_seed: 42
+
+crawl:
+  workers: 8                         # parallel expansions (network bound)
+  expand_per_seed_per_round: 4
+  max_references: 500
+  max_citations: 1000
+  max_depth: null                    # optional hard limit per direction; stopping rules decide otherwise
+  min_year: null
+
+monitor:
+  refit_every: 200                   # new papers between refits
+  min_fit: 60                        # observations before the mixture is fitted
+  components: [2, 3]                 # chosen by BIC
+  posterior: {core: 0.9, rel: 0.5, drop: 0.1}
+  null_floor_quantile: 0.95          # tau_rel is never below this quantile of the null
+  yield: {window: 100, ewma_alpha: 0.3, epsilon: 0.02, windows: 3, min_processed: 200}
+  drift: {auc_min: 0.6, min_level_size: 30}
+  recapture: {target_recall: 0.95, min_rediscovery: 0.8}
+
+validate:
+  sample_per_stratum: 200            # LLM-labelled sample from boundary and from discard
+  target_recall: 0.95
+  weak_auc: 0.8                      # below this, final ranking also uses the LLM score
+  concurrency: 16
+
+pricing:                             # USD per 1M tokens, used for the MAX_COST_USD budget
+  chat_input: 0.20
+  chat_output: 1.20
+  embedding: 0.01

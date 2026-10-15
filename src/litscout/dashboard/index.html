@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LitScout live run</title>
+<style>
+:root{--bg:#f5f6f8;--surface:#fff;--ink:#151a23;--ink2:#4a5263;--muted:#6b7385;--line:#dde2ea;--accent:#2a78d6;
+  --null:#9aa3b2;--obs:#2a78d6;--c1:#eb6834;--c2:#1baf7a;--c3:#4a3aa7;--good:#17713a;--bad:#bf302b;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;--sans:system-ui,-apple-system,"Segoe UI",sans-serif}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1319;--surface:#161b23;--ink:#e7ebf2;--ink2:#b3bbca;--muted:#8a93a5;--line:#29303c;
+  --accent:#4f93ea;--null:#6b7385;--obs:#4f93ea;--good:#62d08c;--bad:#ff8f86;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5}
+main{max-width:1200px;margin:0 auto;padding:20px 16px 60px;display:grid;gap:16px}
+h1{font-size:20px;margin:0}
+h2{font-size:15px;margin:0 0 8px}
+.muted{color:var(--muted)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.tile{background:var(--surface);padding:10px 12px}
+.tile b{display:block;font-size:20px;font-variant-numeric:tabular-nums}
+.tile span{font-size:12px;color:var(--ink2)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px;min-width:0}
+.grid2{display:grid;grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:16px}
+@media (max-width:860px){.grid2{grid-template-columns:minmax(0,1fr)}}
+svg{display:block;width:100%;height:auto}
+svg text{font-family:var(--mono);font-size:11px;fill:var(--ink2)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--ink2);margin-bottom:6px}
+.legend i{display:inline-block;width:12px;height:3px;vertical-align:middle;margin-right:5px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:12px;color:var(--ink2);font-weight:600}
+td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px}
+.on{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
+.off{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}
+.ev{font-family:var(--mono);font-size:12px;max-height:260px;overflow:auto;white-space:pre-wrap}
+#err{color:var(--bad)}
+</style>
+</head>
+<body>
+<main>
+  <div><h1>LitScout live run</h1><div class="muted" id="sub">Waiting for metrics.json…</div><div id="err"></div></div>
+  <div class="tiles" id="tiles"></div>
+  <div class="grid2">
+    <div class="panel"><h2>Similarity distribution</h2>
+      <div class="legend"><span><i style="background:var(--obs)"></i>discovered papers</span><span><i style="background:var(--null)"></i>random baseline (null)</span><span><i style="background:var(--c1)"></i>mixture components</span><span><i style="background:var(--ink)"></i>thresholds</span></div>
+      <div id="hist"></div></div>
+    <div class="panel"><h2>Progress</h2>
+      <div class="legend"><span><i style="background:var(--obs)"></i>relevant papers found</span><span><i style="background:var(--c2)"></i>estimated recall</span><span><i style="background:var(--c3)"></i>rediscovery rate</span></div>
+      <div id="hist2"></div></div>
+  </div>
+  <div class="panel"><h2>Seeds</h2><div class="tbl"><table id="seeds"></table></div></div>
+  <div class="panel"><h2>Decisions</h2><div class="ev" id="events"></div></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+const f3=v=>v==null||isNaN(v)?'–':(+v).toFixed(3);
+function lineSvg(series,W=520,H=200){
+  const L=36,R=W-8,T=10,B=H-24;let n=Math.max(...series.map(s=>s.v.length),2);
+  let s=`<svg viewBox="0 0 ${W} ${H}">`;
+  series.forEach(se=>{const max=se.max||Math.max(...se.v.filter(x=>x!=null),1e-9);
+    const pts=se.v.map((v,i)=>v==null?null:[L+i*(R-L)/(n-1),B-(v/max)*(B-T)]).filter(Boolean);
+    if(pts.length>1)s+=`<polyline fill="none" stroke="var(${se.c})" stroke-width="2" points="${pts.map(p=>p.join(',')).join(' ')}"/>`;});
+  s+=`<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="var(--line)"/><text x="${L}" y="${H-6}">refits →</text></svg>`;return s;}
+function histSvg(m){
+  const W=700,H=260,L=40,R=W-10,T=10,B=H-28,e=m.hist.edges,o=m.hist.observed,nu=m.hist.null;
+  const lo=e[0],hi=e[e.length-1],x=v=>L+(v-lo)/(hi-lo)*(R-L);
+  const so=o.reduce((a,b)=>a+b,0)||1,sn=nu.reduce((a,b)=>a+b,0)||1,bw=(hi-lo)/(e.length-1);
+  const dO=o.map(v=>v/so/bw),dN=nu.map(v=>v/sn/bw);let comp=(m.mixture.components||[]);
+  const scale=so? 1:1;const maxY=Math.max(...dO,...dN,...comp.flat(),1e-9);const y=v=>B-v/maxY*(B-T);
+  let s=`<svg viewBox="0 0 ${W} ${H}">`;
+  for(let t=0;t<=4;t++){const v=lo+(hi-lo)*t/4;s+=`<text x="${x(v)}" y="${H-8}" text-anchor="middle">${v.toFixed(2)}</text>`}
+  dN.forEach((v,i)=>{s+=`<rect x="${x(e[i])}" y="${y(v)}" width="${Math.max(x(e[i+1])-x(e[i])-1,0.5)}" height="${B-y(v)}" fill="var(--null)" opacity=".45"/>`});
+  dO.forEach((v,i)=>{s+=`<rect x="${x(e[i])}" y="${y(v)}" width="${Math.max(x(e[i+1])-x(e[i])-1,0.5)}" height="${B-y(v)}" fill="var(--obs)" opacity=".55"/>`});
+  const cols=['--c1','--c2','--c3'];
+  comp.forEach((c,k)=>{const pts=m.mixture.grid.map((g,i)=>`${x(g)},${y(c[i]*(1))}`).join(' ');s+=`<polyline fill="none" stroke="var(${cols[k%3]})" stroke-width="2" points="${pts}"/>`});
+  const th=m.thresholds;[['drop',th.drop],['rel',th.rel],['core',th.core]].forEach(([n,v])=>{if(v==null)return;
+    s+=`<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${B}" stroke="var(--ink)" stroke-dasharray="4 3"/><text x="${x(v)+3}" y="${T+10}">${n} ${v.toFixed(3)}</text>`});
+  s+=`<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="var(--line)"/></svg>`;return s;}
+function render(m){
+  $('sub').textContent=`${m.state} · topic: ${(m.run&&m.run.topic)||'–'} · updated ${new Date(m.updated*1000).toLocaleTimeString()}`;
+  const seg=m.segments||{},rc=m.recapture||{};
+  const tiles=[['Papers scored',m.papers],['Core',seg.core],['Candidate',seg.candidate],['τ_rel ('+m.thresholds.source+')',f3(m.thresholds.rel)],
+    ['Null q99',f3(m.null.q99)],['Est. recall',rc.recall_est==null?'–':(rc.recall_est*100).toFixed(0)+'%'],['Rediscovery',rc.rediscovery==null?'–':(rc.rediscovery*100).toFixed(0)+'%'],['Cost',`$${(m.cost_usd||0).toFixed(3)}`]];
+  $('tiles').innerHTML=tiles.map(([k,v])=>`<div class="tile"><b>${v??'–'}</b><span>${k}</span></div>`).join('');
+  $('hist').innerHTML=histSvg(m);
+  const h=m.history||[];
+  $('hist2').innerHTML=lineSvg([{v:h.map(x=>x.relevant),c:'--obs'},{v:h.map(x=>x.recall_est),c:'--c2',max:1},{v:h.map(x=>x.rediscovery),c:'--c3',max:1}]);
+  const rows=Object.entries(m.seeds||{}).map(([id,s])=>{const st=s.active?'<span class="pill on">active</span>':`<span class="pill off">stopped</span><div class="muted">${(m.given_up||{})[id]||''}</div>`;
+    const lv=(s.levels||[]).map(l=>`${l.direction==='refs'?'←':'→'}${l.depth}: ${l.auc}`).join(' · ');
+    const y=s.yield||[];const spark=y.length>1?lineSvg([{v:y,c:'--obs',max:Math.max(...y,0.05)}],160,40):'';
+    return `<tr><td>${s.name}</td><td>${st}</td><td class="num">${s.processed}</td><td class="num">${s.relevant}</td><td class="num">${f3(s.frontier_max)}</td><td style="width:170px">${spark}</td><td class="muted">${lv}</td></tr>`}).join('');
+  $('seeds').innerHTML='<tr><th>Seed</th><th>State</th><th>Found</th><th>Relevant</th><th>Frontier max</th><th>Yield (EWMA)</th><th>Depth AUC vs null</th></tr>'+rows;
+  $('events').textContent=(m.events||[]).map(e=>`${new Date(e.at*1000).toLocaleTimeString()}  ${e.kind.padEnd(14)} ${e.rule}  ${JSON.stringify(e.payload)}`).join('\n');
+}
+async function tick(){try{const r=await fetch('metrics.json?'+Date.now());if(r.ok){render(await r.json());$('err').textContent=''}}catch(e){$('err').textContent='Could not read metrics.json: '+e}}
+tick();setInterval(tick,5000);
+</script>
+</body>
+</html>
