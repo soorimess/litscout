@@ -257,10 +257,18 @@ class Crawler:
         self.store.many("UPDATE papers SET posterior=?, segment=? WHERE id=?",
                         [(float(p), t.segment(float(b)), r["id"]) for r, b, p in zip(rows, best, post)])
 
+    def _queued(self, seeds: set[str]) -> dict[str, float]:
+        if not seeds:
+            return {}
+        rows = self.store.q("SELECT f.paper_id, MAX(f.priority) AS p FROM frontier f JOIN papers p ON p.id = f.paper_id "
+                            f"WHERE f.state='queued' AND p.expanded=0 AND f.seed_id IN ({','.join('?' * len(seeds))}) "
+                            "GROUP BY f.paper_id", sorted(seeds))
+        return {r["paper_id"]: r["p"] for r in rows}
+
     def _decide(self) -> Decision:
         self._probe()
         active = self._active()
-        d = self.monitor.decide({s: self._frontier_max(s) for s in self.seed_ids}, active)
+        d = self.monitor.decide({s: self._frontier_max(s) for s in self.seed_ids}, active, self._queued(active))
         for seed, rule in d.give_up.items():
             if seed not in self.given_up:
                 self.given_up[seed] = rule

@@ -66,6 +66,7 @@ litscout run --seeds-dir ./my-seed-pdfs                         # PDF mode
 litscout dashboard <run>        # live dashboard at http://localhost:8765
 litscout status <run>           # thresholds, counts, decisions, cost
 litscout resume <run>           # continue an interrupted run
+litscout resume <run> --recrawl # continue crawling after a stop (e.g. a raised cap)
 litscout validate <run>         # re-run the LLM check
 litscout report <run>           # re-export the tables
 ```

@@ -62,6 +62,17 @@ def test_give_up_when_frontier_exhausted_and_low_yield():
     assert d.stop is None
 
 
+def test_recapture_stop_waits_for_queued_relevant_papers():
+    m = Monitor(CFG, null(), {"s1": "a", "s2": "b"})
+    scores = rng.normal(0.65, 0.03, 200)
+    for s in ("s1", "s2"):  # s2 re-finds every paper s1 found: estimated recall 1.0, rediscovery 1.0
+        for i, c in enumerate(scores):
+            m.observe(f"r{i}", s, "refs", 1, 0, float(c), s == "s1")
+    queued = {f"q{i}": 0.66 for i in range(30)}
+    assert m.decide({"s1": 0.66, "s2": 0.66}, {"s1", "s2"}, queued).stop is None
+    assert m.decide({"s1": 0.66, "s2": 0.66}, {"s1", "s2"}, {}).stop.startswith("M7")
+
+
 def test_llm_calibration_overrides_a_degenerate_mixture():
     # The whole crawl sits far above the null (a citation neighbourhood), relevance starts near 0.70.
     m = Monitor(CFG, null(), {"s1": "seed"})

@@ -257,7 +257,9 @@ class Monitor:
         return {"relevant_found": len(union), "n_hat": n_hat, "recall_est": recall, "rediscovery": redisc}
 
     # -- decisions -----------------------------------------------------------------------------
-    def decide(self, frontier_max: dict[str, Optional[float]], active: set[str]) -> Decision:
+    def decide(self, frontier_max: dict[str, Optional[float]], active: set[str],
+               queued: Optional[dict[str, float]] = None) -> Decision:
+        """queued: unexpanded frontier papers of the active seeds -> priority (their score)."""
         t = self.fit()
         y, dr, rc = self.cfg.get("yield", {}), self.cfg.get("drift", {}), self.cfg.get("recapture", {})
         give_up: dict[str, str] = {}
@@ -283,12 +285,15 @@ class Monitor:
             seeds_out[seed] = {"name": self.seeds[seed], "active": seed in active and seed not in give_up,
                                "frontier_max": fmax, **st}
         rec = self._recapture()
+        # Relevant papers still waiting to be expanded; M7 may stop only when they are negligible.
+        rec["queued_relevant"] = sum(1 for c in (queued or {}).values() if c >= t.rel)
         stop = None
         still = active - set(give_up)
         if not still:
             stop = "all seeds given up"
         elif (rec["recall_est"] is not None and rec["recall_est"] >= rc.get("target_recall", 0.95)
-              and (rec["rediscovery"] or 0) >= rc.get("min_rediscovery", 0.8)):
+              and (rec["rediscovery"] or 0) >= rc.get("min_rediscovery", 0.8)
+              and rec["queued_relevant"] <= (1 - rc.get("target_recall", 0.95)) * rec["relevant_found"]):
             stop = f"M7 estimated recall {rec['recall_est']:.2f} with rediscovery {rec['rediscovery']:.2f}"
         snap = self.snapshot(t, seeds_out, rec)
         return Decision(t, give_up, stop_dirs, stop, snap)

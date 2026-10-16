@@ -127,7 +127,9 @@ Treat each seed's crawl as an independent "capture" of the relevant population.
   `n_A` and `n_B` are the relevant papers each found and `m` the overlap.
 - More seeds: Schnabel's estimator, or a log-linear model over the capture histories.
 - Estimated recall = relevant papers found / `N̂`. **Global stop** when it reaches the target (for
-  example 0.95) or every seed is exhausted.
+  example 0.95) and the relevant papers still queued for expansion are at most `1 − target` of those
+  found, or every seed is exhausted. Without the queue check, overlapping seeds give `N̂` ≈ found and
+  the crawl stopped with relevant papers still waiting (first end-to-end run).
 - Caveat: crawls from different seeds share the citation graph, so they are not independent. The
   overlap is inflated and `N̂` underestimates. Treat it as a signal, not a guarantee.
 

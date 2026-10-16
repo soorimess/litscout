@@ -2,7 +2,7 @@
 
   litscout run --topic "..." --seeds 5        find seeds for a topic, crawl, validate, export
   litscout run --seeds-dir ./seeds             same, with seed PDFs given
-  litscout resume RUN                          continue a stopped or interrupted run
+  litscout resume RUN [--recrawl]              continue an interrupted run (--recrawl: also a finished crawl)
   litscout validate RUN | report RUN           re-run one stage
   litscout dashboard RUN [--port 8765]         serve the live dashboard for a run
   litscout status RUN                          print thresholds, counts and decisions
@@ -77,6 +77,8 @@ def main() -> None:
     r.add_argument("--run", help="run name (default: date + topic)")
     for name in ("resume", "validate", "report", "status"):
         sub.add_parser(name).add_argument("run")
+    sub.choices["resume"].add_argument("--recrawl", action="store_true",
+                                       help="continue crawling even if the crawl had stopped (e.g. after raising a cap)")
     d = sub.add_parser("dashboard")
     d.add_argument("run")
     d.add_argument("--port", type=int, default=8765)
@@ -97,6 +99,8 @@ def main() -> None:
         _pipeline(s, run_dir, store)
     elif a.cmd == "resume":
         run_dir, store = _open(s, a.run)
+        if a.recrawl:
+            store.set_meta("state", "crawling")
         _pipeline(s, run_dir, store)
     elif a.cmd == "validate":
         run_dir, store = _open(s, a.run)
