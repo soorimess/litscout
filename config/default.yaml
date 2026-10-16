@@ -8,7 +8,8 @@ sources:
 
 seed_finder:
   queries: 5                         # search queries the LLM derives from the topic
-  per_query: {openalex: 50, arxiv: 25, crossref: 25, dblp: 25}
+  # DBLP is off: since 2026-10 its API answers scripts with an anti-bot challenge page.
+  per_query: {openalex: 50, arxiv: 25, crossref: 25, dblp: 0}
   abstract_chars_in_prompt: 1200     # abstract length shown to the seed picker
 
 embedding:
