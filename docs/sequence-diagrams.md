@@ -73,6 +73,7 @@ sequenceDiagram
     participant EMB as Embedding API
     participant DB as Paper Store
     participant DM as Distribution Monitor
+    participant LLM as LLM judge
     participant MS as Metrics stream / dashboard
 
     CE->>SRC: sample random papers (null distribution)
@@ -92,10 +93,14 @@ sequenceDiagram
         CE->>EMB: embed title+abstract of new papers (batched)
         EMB-->>CE: vectors
         CE->>DB: store papers, edges, discoveries, per-seed cosines
-        CE->>CE: push papers with score >= tau_rel onto the finder seed's frontier
+        CE->>CE: queue papers with score >= tau_drop on the finder seed's frontier (expanded only if >= tau_rel)
         CE->>DM: observe(new scores, seed, direction, depth)
         opt every K new papers
-            DM->>DM: refit mixture, knee, yield, drift, capture-recapture
+            DM-->>CE: probe papers spread over the score range
+            CE->>LLM: judge probe papers (title + abstract vs topic)
+            LLM-->>CE: relevant yes/no
+            CE->>DM: labels
+            DM->>DM: refit thresholds (LLM calibration, else mixture), knee, yield, drift, capture-recapture
             DM->>MS: metrics snapshot
             DM-->>CE: thresholds, seeds to give up, stop?
             CE->>DB: log decision events

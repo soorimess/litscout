@@ -129,6 +129,7 @@ Implements the methods in [distribution-analysis.md](distribution-analysis.md):
 - M6 frontier gating
 - M7 capture–recapture
 - M8 rediscovery rate
+- M9 LLM probe calibration (a few judged papers per refit set the thresholds)
 
 It refits after every `K` new papers, writes a metrics snapshot, and returns decisions: thresholds,
 seeds to give up, and whether to stop. Every decision is logged with the rule that fired.
@@ -249,8 +250,9 @@ erDiagram
 - LLM judge with versioned judgments
 - Output table writer
 
-The earlier prototype used an LLM gate during the crawl. This system replaces it with embedding similarity and
-the distribution monitor, and keeps the LLM for seed picking and final validation.
+The earlier prototype used an LLM gate on every paper during the crawl. This system ranks by embedding
+similarity and uses the LLM for seed picking, a few hundred calibration probes during the crawl, and
+the final validation.
 
 ## Decisions
 
@@ -260,6 +262,7 @@ the distribution monitor, and keeps the LLM for seed picking and final validatio
 | Random baseline (null) | Random sample from the seeds' field: the most common OpenAlex subfield among the seeds (`primary_topic.subfield`), via `/works?sample=…&filter=primary_topic.subfield.id:…`. A global sample can be enabled for diagnostics. |
 | Seed picking (topic mode) | The LLM picks the N most relevant papers only; no diversity requirement. |
 | Dashboard | Static HTML page that reloads a JSON metrics file. |
+| Live thresholds | Calibrated by small LLM probes during the crawl (M9). The null alone can't separate the topic from its citation neighbourhood. |
 | Vector storage | float32 vectors are 16 KB per paper (about 800 MB for 50,000 papers). Store as float16 (half the size, no measurable effect on cosine ranking). |
 
 ## Open questions

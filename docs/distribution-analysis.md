@@ -101,6 +101,9 @@ null `F0`:
 - Or the Wasserstein distance between the level's distribution and `F0`.
 - When a level is indistinguishable from the null (AUC < 0.6, or distance below `δ`), stop expanding
   that seed in that direction beyond that depth.
+- Also stop when the share of the deepest level at or above `τ_rel` drops below `ε` (2%). Inside a
+  citation neighbourhood every level is far from the null (AUC ≈ 0.98 in the first end-to-end run),
+  so the AUC test alone never fires; the relevant rate does once `τ_rel` is calibrated (M9).
 
 This catches topic drift: forward citations of a popular paper usually drift faster than its
 references.
@@ -133,15 +136,35 @@ Treat each seed's crawl as an independent "capture" of the relevant population.
 The share of relevant papers in a window that were already in the store, reached through another seed
 or path. A value close to 1 means the relevant region is saturated.
 
+## M9. LLM probe calibration of the thresholds
+
+The null tells unrelated papers apart from the field, but not "on the topic" from "in the same
+neighbourhood". In the first end-to-end test run, the crawled scores formed one
+broad group around 0.58, far above the null (mean 0.28, q95 0.40). The mixture's background
+component landed on the null side, so `τ_rel` fell to the null floor and 1,268 of 1,375 papers were
+"core". An LLM check of 48 papers spread over the score range put the real boundary near 0.70:
+papers from neighbouring areas (broad surveys, related but different tasks) scored 0.6–0.7 and were not relevant.
+
+So the monitor asks the LLM directly, in small amounts:
+
+- At each refit, the LLM judges up to 40 unlabeled papers spread evenly over the observed score range
+  (8 bins), with the same prompt as the final check. At most 400 labels per run (about $0.12).
+- Once there are at least 40 labels with at least 5 of each class, a logistic regression of
+  P(relevant | atanh(c)) replaces the mixture. `τ_drop`, `τ_rel` and `τ_core` are the scores where it
+  crosses 0.1, 0.5 and 0.9, and `τ_rel` never goes below the null's q95.
+- If the slope is not positive (higher cosine is not more often relevant), the calibration is
+  rejected and the mixture or null thresholds stay.
+- The labels are kept in the `judgments` table and reused by the final check.
+
 ## Recommended default policy
 
 | Decision | Rule |
 |---|---|
-| Thresholds | M2 mixture, background anchored by M1 field null, refit every 200 papers; M3 knee as a cross-check |
+| Thresholds | M9 LLM calibration once enough labels exist; before that the M2 mixture anchored by the M1 field null; refit every 200 papers; M3 knee as a cross-check |
 | Expand a paper | `c(p) ≥ τ_rel`, best-first per seed (M6) |
-| Give up on a seed | frontier maximum `< τ_rel` (M6), or EWMA yield `< 2%` for 3 windows of 100 (M4), or every remaining level indistinguishable from the null (M5) |
+| Give up on a seed | frontier maximum `< τ_rel` (M6), or EWMA yield `< 2%` for 3 windows of 100 (M4), or the deepest levels in both directions indistinguishable from the null or almost free of relevant papers (M5) |
 | Global stop | all seeds given up, or estimated recall ≥ 0.95 (M7) with rediscovery ≥ 0.8 (M8), or a budget cap (papers, API calls, money) |
-| Output segments | core / candidate / boundary / discard from the M2 posterior |
+| Output segments | core / candidate / boundary / discard from the posterior (M9, else M2) |
 
 ## Live dashboard
 
@@ -160,6 +183,7 @@ The monitor writes one metrics snapshot per refit. The dashboard renders:
 
 After the crawl stops, an LLM judge reads the title and abstract of selected papers against the topic.
 
+- **Reuse the M9 probe labels** and weight every judged paper by its segment's sampling rate.
 - **Judge all of core + candidate.** These are expected to be a few thousand papers, at roughly
   $0.0003 per paper with the current model.
 - **Judge a stratified sample from boundary and discard** (for example 200 each). This estimates how

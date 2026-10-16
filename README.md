@@ -20,7 +20,9 @@ most related segment with an LLM.
    Scholar fills in where OpenAlex has no references or citations (common for recent preprints).
    Every discovered paper is embedded (title + abstract) and scored against every seed.
 4. **Live monitor:** periodically refits thresholds and decides which seeds or directions to give up
-   and when to stop. It fits a mixture model against the random baseline, and tracks per-seed yield,
+   and when to stop. At each refit the LLM judges a few papers spread over the score range, and a
+   logistic fit of those labels sets the thresholds (before enough labels exist, a mixture model
+   against the random baseline does). It also tracks per-seed yield,
    drift by depth, frontier exhaustion, and capture–recapture recall. It writes `metrics.json` for
    the dashboard. Details: [docs/distribution-analysis.md](docs/distribution-analysis.md).
 5. **LLM validation:** the LLM judges every core and candidate paper, plus a stratified sample below

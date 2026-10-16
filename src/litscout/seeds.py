@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Optional
 
-import fitz  # PyMuPDF
+import pymupdf
 import numpy as np
 
 from .llm import LLM, embed_text
@@ -54,7 +54,7 @@ def _store_seed(store: Store, rec: dict[str, Any], origin: str, reason: str) -> 
 
 # -- PDF folder -------------------------------------------------------------------------------
 def _pdf_fields(path: Path) -> dict[str, Any]:
-    with fitz.open(path) as doc:
+    with pymupdf.open(path) as doc:
         text = "\n".join(doc[i].get_text() for i in range(min(2, doc.page_count)))
         meta_title = (doc.metadata or {}).get("title") or ""
         title = meta_title.strip() if len(meta_title.strip()) > 10 else ""

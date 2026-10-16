@@ -6,7 +6,8 @@ from litscout.monitor import Monitor, auc, chapman, knee
 CFG = {"min_fit": 60, "components": [2, 3], "posterior": {"core": 0.9, "rel": 0.5, "drop": 0.1},
        "null_floor_quantile": 0.95, "yield": {"window": 50, "ewma_alpha": 0.3, "epsilon": 0.02, "windows": 3,
        "min_processed": 100}, "drift": {"auc_min": 0.6, "min_level_size": 30},
-       "recapture": {"target_recall": 0.95, "min_rediscovery": 0.8}}
+       "recapture": {"target_recall": 0.95, "min_rediscovery": 0.8},
+       "probe": {"per_fit": 40, "max_labels": 400, "min_labels": 40, "min_each": 5, "bins": 8, "C": 10.0}}
 rng = np.random.default_rng(0)
 
 
@@ -59,3 +60,29 @@ def test_give_up_when_frontier_exhausted_and_low_yield():
     d = m.decide({"s1": 0.7, "s2": 0.2}, {"s1", "s2"})
     assert "s2" in d.give_up and "s1" not in d.give_up
     assert d.stop is None
+
+
+def test_llm_calibration_overrides_a_degenerate_mixture():
+    # The whole crawl sits far above the null (a citation neighbourhood), relevance starts near 0.70.
+    m = Monitor(CFG, null(), {"s1": "seed"})
+    obs = np.clip(rng.normal(0.58, 0.08, 1500), -1, 1)
+    for i, c in enumerate(obs):
+        m.observe(f"p{i}", "s1", "refs", 1, 0, float(c), True)
+    probes = m.probe_candidates(120)
+    assert len(probes) == len(set(probes)) and 60 <= len(probes) <= 120
+    for pid in probes:
+        m.label(pid, m.scores[pid] >= 0.70)
+    t = m.fit()
+    assert t.source.startswith("llm-calibrated"), t.source
+    assert 0.66 < t.rel < 0.74, t.rel
+    assert t.drop <= t.rel <= t.core
+    assert not set(m.probe_candidates(40)) & set(probes)
+
+
+def test_no_calibration_when_labels_are_one_sided():
+    m = Monitor(CFG, null(), {"s1": "seed"})
+    for i, c in enumerate(rng.normal(0.58, 0.08, 500)):
+        m.observe(f"p{i}", "s1", "refs", 1, 0, float(c), True)
+    for pid in m.probe_candidates(60):
+        m.label(pid, False)
+    assert not m.fit().source.startswith("llm")

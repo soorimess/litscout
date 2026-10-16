@@ -51,6 +51,9 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
       <div class="legend"><span><i style="background:var(--obs)"></i>relevant papers found</span><span><i style="background:var(--c2)"></i>estimated recall</span><span><i style="background:var(--c3)"></i>rediscovery rate</span></div>
       <div id="hist2"></div></div>
   </div>
+  <div class="panel"><h2>LLM calibration (M9)</h2>
+    <div class="legend"><span><i style="background:var(--c2)"></i>judged relevant</span><span><i style="background:var(--null)"></i>judged not relevant</span><span><i style="background:var(--ink)"></i>P(relevant | cosine)</span></div>
+    <div id="calib"></div></div>
   <div class="panel"><h2>Seeds</h2><div class="tbl"><table id="seeds"></table></div></div>
   <div class="panel"><h2>Decisions</h2><div class="ev" id="events"></div></div>
 </main>
@@ -79,6 +82,17 @@ function histSvg(m){
   const th=m.thresholds;[['drop',th.drop],['rel',th.rel],['core',th.core]].forEach(([n,v])=>{if(v==null)return;
     s+=`<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${B}" stroke="var(--ink)" stroke-dasharray="4 3"/><text x="${x(v)+3}" y="${T+10}">${n} ${v.toFixed(3)}</text>`});
   s+=`<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="var(--line)"/></svg>`;return s;}
+function calibSvg(m){
+  const c=m.calibration||{},pts=c.points||[],W=700,H=200,L=40,R=W-10,T=10,B=H-28;
+  if(!pts.length)return '<div class="muted">No LLM judgments yet: the first probe runs at the first refit.</div>';
+  const g=m.mixture.grid,lo=g[0],hi=g[g.length-1],x=v=>L+(v-lo)/(hi-lo)*(R-L),y=v=>B-v*(B-T);
+  let s=`<svg viewBox="0 0 ${W} ${H}">`;
+  for(let t=0;t<=4;t++){const v=lo+(hi-lo)*t/4;s+=`<text x="${x(v)}" y="${H-8}" text-anchor="middle">${v.toFixed(2)}</text>`}
+  pts.forEach(([v,r],i)=>{s+=`<circle cx="${x(v)}" cy="${y(r?0.97-(i%5)*0.02:0.03+(i%5)*0.02)}" r="3" fill="var(${r?'--c2':'--null'})" opacity=".8"/>`});
+  if((c.curve||[]).length)s+=`<polyline fill="none" stroke="var(--ink)" stroke-width="2" points="${g.map((v,i)=>`${x(v)},${y(c.curve[i])}`).join(' ')}"/>`;
+  const th=m.thresholds;[['drop',th.drop],['rel',th.rel],['core',th.core]].forEach(([n,v])=>{if(v==null)return;
+    s+=`<line x1="${x(v)}" x2="${x(v)}" y1="${T}" y2="${B}" stroke="var(--ink)" stroke-dasharray="4 3" opacity=".5"/><text x="${x(v)+3}" y="${B-4}">${n}</text>`});
+  s+=`<line x1="${L}" x2="${R}" y1="${B}" y2="${B}" stroke="var(--line)"/><text x="${L}" y="${T+8}">${c.labels} judged, ${c.relevant} relevant</text></svg>`;return s;}
 function render(m){
   $('sub').textContent=`${m.state} · topic: ${(m.run&&m.run.topic)||'–'} · updated ${new Date(m.updated*1000).toLocaleTimeString()}`;
   const seg=m.segments||{},rc=m.recapture||{};
@@ -86,13 +100,14 @@ function render(m){
     ['Null q99',f3(m.null.q99)],['Est. recall',rc.recall_est==null?'–':(rc.recall_est*100).toFixed(0)+'%'],['Rediscovery',rc.rediscovery==null?'–':(rc.rediscovery*100).toFixed(0)+'%'],['Cost',`$${(m.cost_usd||0).toFixed(3)}`]];
   $('tiles').innerHTML=tiles.map(([k,v])=>`<div class="tile"><b>${v??'–'}</b><span>${k}</span></div>`).join('');
   $('hist').innerHTML=histSvg(m);
+  $('calib').innerHTML=calibSvg(m);
   const h=m.history||[];
   $('hist2').innerHTML=lineSvg([{v:h.map(x=>x.relevant),c:'--obs'},{v:h.map(x=>x.recall_est),c:'--c2',max:1},{v:h.map(x=>x.rediscovery),c:'--c3',max:1}]);
   const rows=Object.entries(m.seeds||{}).map(([id,s])=>{const st=s.active?'<span class="pill on">active</span>':`<span class="pill off">stopped</span><div class="muted">${(m.given_up||{})[id]||''}</div>`;
-    const lv=(s.levels||[]).map(l=>`${l.direction==='refs'?'←':'→'}${l.depth}: ${l.auc}`).join(' · ');
+    const lv=(s.levels||[]).map(l=>`${l.direction==='refs'?'←':'→'}${l.depth}: AUC ${l.auc}, rel ${l.rel_rate==null?'–':(l.rel_rate*100).toFixed(0)+'%'}`).join(' · ');
     const y=s.yield||[];const spark=y.length>1?lineSvg([{v:y,c:'--obs',max:Math.max(...y,0.05)}],160,40):'';
     return `<tr><td>${s.name}</td><td>${st}</td><td class="num">${s.processed}</td><td class="num">${s.relevant}</td><td class="num">${f3(s.frontier_max)}</td><td style="width:170px">${spark}</td><td class="muted">${lv}</td></tr>`}).join('');
-  $('seeds').innerHTML='<tr><th>Seed</th><th>State</th><th>Found</th><th>Relevant</th><th>Frontier max</th><th>Yield (EWMA)</th><th>Depth AUC vs null</th></tr>'+rows;
+  $('seeds').innerHTML='<tr><th>Seed</th><th>State</th><th>Found</th><th>Relevant</th><th>Frontier max</th><th>Yield (EWMA)</th><th>Depth levels (AUC vs null, relevant rate)</th></tr>'+rows;
   $('events').textContent=(m.events||[]).map(e=>`${new Date(e.at*1000).toLocaleTimeString()}  ${e.kind.padEnd(14)} ${e.rule}  ${JSON.stringify(e.payload)}`).join('\n');
 }
 async function tick(){try{const r=await fetch('metrics.json?'+Date.now());if(r.ok){render(await r.json());$('err').textContent=''}}catch(e){$('err').textContent='Could not read metrics.json: '+e}}

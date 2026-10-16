@@ -36,7 +36,10 @@ monitor:
   posterior: {core: 0.9, rel: 0.5, drop: 0.1}
   null_floor_quantile: 0.95          # tau_rel is never below this quantile of the null
   yield: {window: 100, ewma_alpha: 0.3, epsilon: 0.02, windows: 3, min_processed: 200}
-  drift: {auc_min: 0.6, min_level_size: 30}
+  drift: {auc_min: 0.6, min_rate: 0.02, min_level_size: 30}
+  # M9: at each refit the LLM judges up to per_fit papers spread over the score range; once there are
+  # min_labels labels (min_each of each class), a logistic fit of P(relevant | cosine) sets the thresholds.
+  probe: {per_fit: 40, max_labels: 400, min_labels: 40, min_each: 5, bins: 8, C: 10.0}
   recapture: {target_recall: 0.95, min_rediscovery: 0.8}
 
 validate:

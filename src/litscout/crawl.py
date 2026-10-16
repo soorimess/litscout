@@ -19,6 +19,7 @@ from .sources import Sources
 from .sources.http import SourceUnavailable
 from .sources.records import merge
 from .store import Store
+from .validate import JUDGE_SYSTEM, judge_many
 
 log = logging.getLogger(__name__)
 SEED_PRIORITY = 9.0  # seeds are expanded first
@@ -59,6 +60,8 @@ class Crawler:
         # Resume: replay earlier discoveries into the monitor.
         for r in self.store.q("SELECT d.*, p.best FROM discoveries d JOIN papers p ON p.id = d.paper_id ORDER BY d.at"):
             self.monitor.observe(r["paper_id"], r["seed_id"], r["direction"], r["back"], r["fwd"], r["best"] or 0, bool(r["first"]))
+        for r in self.store.q("SELECT paper_id, relevant FROM judgments"):
+            self.monitor.label(r["paper_id"], bool(r["relevant"]))
         for r in seeds:
             if r["expandable"] or self.store.paper(r["id"]).get("arxiv") or self.store.paper(r["id"]).get("doi"):
                 self.store.x("INSERT OR IGNORE INTO frontier (seed_id, paper_id, priority, back, fwd, state) "
@@ -229,7 +232,33 @@ class Crawler:
     def _active(self) -> set[str]:
         return {s for s in self.seed_ids if s not in self.given_up}
 
+    def _probe(self) -> None:
+        """M9: the LLM judges a few papers spread over the score range, to calibrate the thresholds."""
+        pc = self.s.t("monitor", "probe", default={}) or {}
+        n = min(int(pc.get("per_fit", 40)), int(pc.get("max_labels", 400)) - len(self.monitor.labels))
+        ids = self.monitor.probe_candidates(n)
+        if not ids:
+            return
+        papers = [dict(r) for r in self.store.q(
+            f"SELECT id, title, abstract, year FROM papers WHERE id IN ({','.join('?' * len(ids))})", ids)]
+        system = JUDGE_SYSTEM.format(topic=self.store.meta("topic"))
+        results = judge_many(self.llm, system, [(p, "probe") for p in papers],
+                             int(self.s.t("validate", "concurrency", default=16)))
+        self.store.many("INSERT OR REPLACE INTO judgments VALUES (?, ?, ?, ?, ?, ?)", results)
+        for r in results:
+            self.monitor.label(r[0], bool(r[3]))
+        log.info("probe: LLM judged %d papers (%d relevant), %d labels in total",
+                 len(results), sum(r[3] for r in results), len(self.monitor.labels))
+
+    def _assign_segments(self, t: Any) -> None:
+        rows = self.store.q("SELECT id, best FROM papers WHERE segment IS NOT 'seed' AND best IS NOT NULL")
+        best = np.array([r["best"] for r in rows], dtype=float)
+        post = t.posterior(best) if len(best) else best
+        self.store.many("UPDATE papers SET posterior=?, segment=? WHERE id=?",
+                        [(float(p), t.segment(float(b)), r["id"]) for r, b, p in zip(rows, best, post)])
+
     def _decide(self) -> Decision:
+        self._probe()
         active = self._active()
         d = self.monitor.decide({s: self._frontier_max(s) for s in self.seed_ids}, active)
         for seed, rule in d.give_up.items():
@@ -244,6 +273,7 @@ class Crawler:
         self.store.set_meta("given_up", self.given_up)
         self.store.set_meta("stopped_dirs", self.stopped_dirs)
         self.store.set_meta("thresholds", d.snapshot["thresholds"])
+        self._assign_segments(d.thresholds)
         self._write_metrics(d.snapshot, state="crawling")
         return d
 
@@ -258,6 +288,7 @@ class Crawler:
         tmp = self.run_dir / "metrics.json.tmp"
         tmp.write_text(json.dumps(payload, default=float))
         tmp.replace(self.run_dir / "metrics.json")
+        self.store.set_meta("cost_usd", self.budget.spent)
 
     def run(self) -> None:
         self.prepare()
@@ -293,13 +324,7 @@ class Crawler:
 
     def finalize(self, rule: str) -> None:
         d = self.monitor.decide({s: self._frontier_max(s) for s in self.seed_ids}, self._active())
-        t = d.thresholds
-        rows = self.store.q("SELECT id, best FROM papers WHERE segment IS NOT 'seed' AND best IS NOT NULL")
-        best = np.array([r["best"] for r in rows], dtype=float)
-        post = t.posterior(best) if len(best) else best
-        self.store.many("UPDATE papers SET posterior=?, segment=? WHERE id=?",
-                        [(float(p), t.segment(float(b)), r["id"]) for r, b, p in zip(rows, best, post)])
+        self._assign_segments(d.thresholds)
         self.store.set_meta("thresholds", d.snapshot["thresholds"])
-        self.store.set_meta("cost_usd", self.budget.spent)
         self.store.set_meta("state", "crawled")
         self._write_metrics(d.snapshot, state=f"stopped: {rule}")

@@ -11,7 +11,7 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.metrics import roc_auc_score
 
 from .config import Settings
-from .llm import LLM
+from .llm import LLM, BudgetExceeded
 from .store import Store
 
 log = logging.getLogger(__name__)
@@ -33,9 +33,24 @@ def _judge(llm: LLM, system: str, p: dict[str, Any], stratum: str) -> tuple:
         score = int(out.get("score", 0))
         rel = bool(out.get("relevant", score >= 6))
         return (p["id"], stratum, score, int(rel), str(out.get("reason", ""))[:500], llm.s.llm_model)
+    except BudgetExceeded:
+        raise
     except Exception as e:  # keep going; the paper stays unjudged and is retried on the next run
         log.warning("judge failed for %s: %s", p["id"], e)
         return None
+
+
+def judge_many(llm: LLM, system: str, items: list[tuple[dict[str, Any], str]], workers: int) -> list[tuple]:
+    """Judge papers in parallel; on a budget stop, keep what was judged so far."""
+    out: list[tuple] = []
+    with ThreadPoolExecutor(workers) as pool:
+        try:
+            for r in pool.map(lambda t: _judge(llm, system, *t), items):
+                if r:
+                    out.append(r)
+        except BudgetExceeded as e:
+            log.warning("judging stopped: %s", e)
+    return out
 
 
 def validate(s: Settings, store: Store, llm: LLM) -> dict[str, Any]:
@@ -49,27 +64,30 @@ def validate(s: Settings, store: Store, llm: LLM) -> dict[str, Any]:
                 for seg in ("core", "candidate", "boundary", "discard")}
     n_sample = int(cfg.get("sample_per_stratum", 200))
     todo: list[tuple[dict[str, Any], str]] = [(p, seg) for seg in ("core", "candidate") for p in seg_rows[seg]]
-    weights: dict[str, float] = {"core": 1.0, "candidate": 1.0}
     for seg in ("boundary", "discard"):
         rows = seg_rows[seg]
         pick = [rows[i] for i in rng.choice(len(rows), min(n_sample, len(rows)), replace=False)] if rows else []
         todo += [(p, seg) for p in pick]
-        weights[seg] = len(rows) / max(len(pick), 1)
-    done = {r["paper_id"] for r in store.q("SELECT paper_id FROM judgments")}
+    done = {r["paper_id"] for r in store.q("SELECT paper_id FROM judgments")}  # includes the crawl's probes
     todo = [(p, seg) for p, seg in todo if p["id"] not in done]
-    log.info("LLM validation: %d papers to judge", len(todo))
-    with ThreadPoolExecutor(int(cfg.get("concurrency", 16))) as pool:
-        results = [r for r in pool.map(lambda t: _judge(llm, system, *t), todo) if r]
+    log.info("LLM validation: %d papers to judge (%d already judged)", len(todo), len(done))
+    results = judge_many(llm, system, todo, int(cfg.get("concurrency", 16)))
     store.many("INSERT OR REPLACE INTO judgments VALUES (?, ?, ?, ?, ?, ?)", results)
 
-    rows = [dict(r) for r in store.q("SELECT j.*, p.best, p.best_seed FROM judgments j JOIN papers p ON p.id = j.paper_id")]
+    rows = [dict(r) for r in store.q("SELECT j.*, p.best, p.best_seed, p.segment FROM judgments j "
+                                     "JOIN papers p ON p.id = j.paper_id WHERE p.segment IS NOT 'seed'")]
+    # Each judged paper stands for its segment: weight = segment size / judged papers in that segment.
+    judged_per_seg: dict[str, int] = {}
+    for r in rows:
+        judged_per_seg[r["segment"]] = judged_per_seg.get(r["segment"], 0) + 1
+    weights = {seg: len(seg_rows.get(seg, [])) / n if seg in seg_rows else 1.0 for seg, n in judged_per_seg.items()}
     if len(rows) < 10 or len({r["relevant"] for r in rows}) < 2:
         report = {"note": "too few or one-sided judgments to evaluate the ranking", "judged": len(rows)}
         store.set_meta("validation", report)
         return report
     c = np.array([r["best"] for r in rows])
     y = np.array([r["relevant"] for r in rows])
-    w = np.array([weights.get(r["stratum"], 1.0) for r in rows])
+    w = np.array([weights.get(r["segment"], 1.0) for r in rows])
     llm_score = np.array([r["score"] for r in rows])
     auc_v = float(roc_auc_score(y, c, sample_weight=w))
     rho = float(spearmanr(c, llm_score).correlation)

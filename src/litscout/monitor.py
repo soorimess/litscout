@@ -1,4 +1,4 @@
-"""Live analysis of the similarity stream (docs/distribution-analysis.md, methods M1-M8).
+"""Live analysis of the similarity stream (docs/distribution-analysis.md, methods M1-M9).
 
 The crawl reports every discovery; the monitor refits periodically and returns thresholds and
 decisions: which seeds or directions to give up and whether to stop globally."""
@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import numpy as np
+from sklearn.linear_model import LogisticRegression
 from sklearn.mixture import GaussianMixture
 
 EPS = 1e-6
@@ -65,9 +66,13 @@ class Thresholds:
     source: str = "null"
     components: list[dict[str, float]] = field(default_factory=list)
     knee: Optional[float] = None
+    logit: Optional[tuple[float, float]] = None  # (intercept, slope) on atanh(c), from LLM labels
 
     def posterior(self, c: np.ndarray) -> np.ndarray:
-        """P(relevant | c) from the fitted mixture; a step function around rel before a fit exists."""
+        """P(relevant | c): LLM calibration if fitted, else the mixture, else a step function."""
+        if self.logit:
+            a, b = self.logit
+            return 1 / (1 + np.exp(-(a + b * _atanh(np.asarray(c, dtype=float)))))
         if not self.components:
             return np.where(c >= self.core, 0.95, np.where(c >= self.rel, 0.6, np.where(c >= self.drop, 0.3, 0.05)))
         x = _atanh(np.asarray(c, dtype=float))
@@ -106,6 +111,7 @@ class Monitor:
         # discovery stream: (paper_id, seed, direction, back, fwd, score, first)
         self.events: list[tuple[str, str, str, int, int, float, bool]] = []
         self.scores: dict[str, float] = {}  # unique papers (not seeds) -> best cosine
+        self.labels: dict[str, int] = {}    # LLM judgments (M9): paper -> relevant (0/1)
         self.t = self._null_thresholds()
         self.history: list[dict[str, Any]] = []
 
@@ -114,6 +120,26 @@ class Monitor:
         self.events.append((paper_id, seed, direction, back, fwd, float(score), first))
         if first:
             self.scores[paper_id] = float(score)
+
+    def label(self, paper_id: str, relevant: bool) -> None:
+        self.labels[paper_id] = int(relevant)
+
+    def probe_candidates(self, n: int, seed: int = 0) -> list[str]:
+        """Unlabeled papers for the LLM to judge (M9), spread evenly over the observed score range."""
+        free = [(pid, c) for pid, c in self.scores.items() if pid not in self.labels]
+        if n <= 0 or len(self.scores) < self.cfg.get("min_fit", 60) or not free:
+            return []
+        rng = np.random.default_rng(seed + len(self.labels))
+        obs = np.array(list(self.scores.values()))
+        bins = int(self.cfg.get("probe", {}).get("bins", 8))
+        edges = np.linspace(np.quantile(obs, 0.02), obs.max(), bins + 1)
+        edges[-1] += 1e-9
+        picked: list[str] = []
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            pool = [pid for pid, c in free if lo <= c < hi]
+            k = min(len(pool), max(1, n // bins))
+            picked += [pool[i] for i in rng.choice(len(pool), k, replace=False)] if k else []
+        return picked[:n]
 
     # -- thresholds (M1, M2, M3) ------------------------------------------------------------------
     def _null_thresholds(self) -> Thresholds:
@@ -125,10 +151,32 @@ class Monitor:
         if len(obs) < m.get("min_fit", 60):
             t = self._null_thresholds()
         else:
-            t = self._mixture(obs) or self._null_thresholds()
+            t = self._calibrated() or self._mixture(obs) or self._null_thresholds()
         t.knee = knee(np.sort(obs)[::-1]) if len(obs) else None
         self.t = t
         return t
+
+    def _calibrated(self) -> Optional[Thresholds]:
+        """M9: thresholds from a logistic fit of the LLM's relevance labels on the cosine score."""
+        pc = self.cfg.get("probe", {})
+        pairs = [(self.scores[pid], y) for pid, y in self.labels.items() if pid in self.scores]
+        ys = [y for _, y in pairs]
+        if len(pairs) < pc.get("min_labels", 40) or min(sum(ys), len(ys) - sum(ys)) < pc.get("min_each", 5):
+            return None
+        x = _atanh(np.array([c for c, _ in pairs])).reshape(-1, 1)
+        lr = LogisticRegression(C=float(pc.get("C", 10.0))).fit(x, ys)
+        a, b = float(lr.intercept_[0]), float(lr.coef_[0, 0])
+        if b <= 0:  # higher cosine is not more relevant: the score carries no usable signal
+            return None
+        p = self.cfg.get("posterior", {})
+
+        def cross(level: float) -> float:
+            return math.tanh((math.log(level / (1 - level)) - a) / b)
+
+        floor = float(np.quantile(self.null, self.cfg.get("null_floor_quantile", 0.95)))
+        rel = max(cross(p.get("rel", 0.5)), floor)
+        return Thresholds(drop=min(cross(p.get("drop", 0.1)), rel), rel=rel, core=max(cross(p.get("core", 0.9)), rel),
+                          source=f"llm-calibrated ({len(pairs)} labels)", logit=(a, b))
 
     def _mixture(self, obs: np.ndarray) -> Optional[Thresholds]:
         x = _atanh(obs).reshape(-1, 1)
@@ -182,7 +230,8 @@ class Monitor:
             depth = b if d == "refs" else f
             levels.setdefault((d, depth), []).append(s)
         dmin = self.cfg.get("drift", {}).get("min_level_size", 30)
-        lv = [{"direction": d, "depth": depth, "n": len(v), "auc": round(auc(np.array(v), self.null), 4)}
+        lv = [{"direction": d, "depth": depth, "n": len(v), "auc": round(auc(np.array(v), self.null), 4),
+               "rel_rate": round(float(np.mean(np.array(v) >= self.t.rel)), 4)}
               for (d, depth), v in sorted(levels.items()) if len(v) >= dmin]
         return {"processed": len(firsts), "relevant": int(sum(rel)), "yield": series, "low_windows": low,
                 "levels": lv, "cumulative": np.cumsum(rel)[::max(1, len(rel) // 200)].tolist() if rel else []}
@@ -225,12 +274,12 @@ class Monitor:
                 dirs = []
                 for d in ("refs", "cits"):
                     lv = [l for l in st["levels"] if l["direction"] == d]
-                    if lv and lv[-1]["auc"] < dr.get("auc_min", 0.6):
+                    if lv and (lv[-1]["auc"] < dr.get("auc_min", 0.6) or lv[-1]["rel_rate"] < dr.get("min_rate", 0.02)):
                         dirs.append(d)
                 if dirs:
                     stop_dirs[seed] = dirs
                     if len(dirs) == 2 and seed not in give_up:
-                        give_up[seed] = "M5 deepest levels in both directions look like the null"
+                        give_up[seed] = "M5 deepest levels in both directions hold almost no relevant papers"
             seeds_out[seed] = {"name": self.seeds[seed], "active": seed in active and seed not in give_up,
                                "frontier_max": fmax, **st}
         rec = self._recapture()
@@ -259,6 +308,10 @@ class Monitor:
             for comp in t.components:
                 dens = comp["w"] * np.exp(-0.5 * ((x - comp["mu"]) / comp["sd"]) ** 2) / (comp["sd"] * math.sqrt(2 * math.pi))
                 curves.append((dens / np.clip(1 - grid ** 2, 1e-4, None)).round(5).tolist())
+        labelled = [(self.scores[p], y) for p, y in self.labels.items() if p in self.scores]
+        calib = {"labels": len(labelled), "relevant": int(sum(y for _, y in labelled)),
+                 "points": [[round(c, 4), y] for c, y in labelled],
+                 "curve": t.posterior(grid).round(4).tolist() if t.logit else []}
         self.history.append({"papers": len(obs), "rel": t.rel, "core": t.core, "relevant": rec["relevant_found"],
                              "recall_est": rec["recall_est"], "rediscovery": rec["rediscovery"]})
         return {
@@ -266,6 +319,6 @@ class Monitor:
             "null": self.nq, "papers": len(obs),
             "segments": {s: int(sum(1 for c in obs if t.segment(c) == s)) for s in ("core", "candidate", "boundary", "discard")},
             "hist": {"edges": edges.round(4).tolist(), "observed": h_obs, "null": h_null},
-            "mixture": {"grid": grid.round(4).tolist(), "components": curves},
+            "mixture": {"grid": grid.round(4).tolist(), "components": curves}, "calibration": calib,
             "seeds": seeds, "recapture": rec, "history": self.history[-500:],
         }
