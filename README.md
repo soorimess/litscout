@@ -64,6 +64,7 @@ Tuning (thresholds, window sizes, null sample size, pricing) is in `config/defau
 litscout run --topic "machine learning for weather forecasting" --seeds 5   # topic mode
 litscout run --seeds-dir ./my-seed-pdfs                         # PDF mode
 litscout dashboard <run>        # live dashboard at http://localhost:8765
+litscout dashboard <run> --host 0.0.0.0   # reachable from other machines (serves only the page and metrics.json)
 litscout status <run>           # thresholds, counts, decisions, cost
 litscout resume <run>           # continue an interrupted run
 litscout resume <run> --recrawl # continue crawling after a stop (e.g. a raised cap)

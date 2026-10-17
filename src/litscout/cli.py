@@ -4,7 +4,7 @@
   litscout run --seeds-dir ./seeds             same, with seed PDFs given
   litscout resume RUN [--recrawl]              continue an interrupted run (--recrawl: also a finished crawl)
   litscout validate RUN | report RUN           re-run one stage
-  litscout dashboard RUN [--port 8765]         serve the live dashboard for a run
+  litscout dashboard RUN [--host H] [--port P] serve the live dashboard for a run
   litscout status RUN                          print thresholds, counts and decisions
 """
 from __future__ import annotations
@@ -36,6 +36,30 @@ def _open(s: Settings, run: str) -> tuple[Path, Store]:
     if not (run_dir / "store.sqlite").exists() and not run_dir.exists():
         run_dir.mkdir(parents=True)
     return run_dir, Store(run_dir / "store.sqlite", s.t("embedding", "store_dtype", default="float16"))
+
+
+class _DashboardHandler(http.server.SimpleHTTPRequestHandler):
+    """Serves only the dashboard page and its metrics file, never the store or the outputs."""
+
+    ALLOWED = {"/": "/index.html", "/index.html": "/index.html", "/metrics.json": "/metrics.json"}
+
+    def do_GET(self) -> None:
+        path = self.ALLOWED.get(self.path.split("?", 1)[0])
+        if path is None:
+            self.send_error(404)
+            return
+        self.path = path
+        super().do_GET()
+
+    def do_HEAD(self) -> None:
+        self.do_GET()
+
+    def list_directory(self, path):  # noqa: ANN001
+        self.send_error(404)
+        return None
+
+    def log_message(self, *args) -> None:  # noqa: ANN002
+        pass
 
 
 def _install_dashboard(run_dir: Path) -> None:
@@ -81,6 +105,7 @@ def main() -> None:
                                        help="continue crawling even if the crawl had stopped (e.g. after raising a cap)")
     d = sub.add_parser("dashboard")
     d.add_argument("run")
+    d.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to open it from other machines")
     d.add_argument("--port", type=int, default=8765)
     a = ap.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -119,9 +144,9 @@ def main() -> None:
     elif a.cmd == "dashboard":
         run_dir = s.runs_dir / a.run
         _install_dashboard(run_dir)
-        handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(run_dir))
-        print(f"Dashboard: http://localhost:{a.port}/  (Ctrl+C to stop)")
-        http.server.ThreadingHTTPServer(("", a.port), handler).serve_forever()
+        handler = functools.partial(_DashboardHandler, directory=str(run_dir))
+        print(f"Dashboard: http://{a.host}:{a.port}/  (Ctrl+C to stop)")
+        http.server.ThreadingHTTPServer((a.host, a.port), handler).serve_forever()
 
 
 if __name__ == "__main__":
