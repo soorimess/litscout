@@ -46,7 +46,7 @@ class Crossref:
 
 
 class Arxiv:
-    API = "http://export.arxiv.org/api/query"
+    API = "https://export.arxiv.org/api/query"
     NS = {"a": "http://www.w3.org/2005/Atom"}
 
     def __init__(self, min_interval: float = 3.1):
