@@ -45,7 +45,7 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
   <div class="tiles" id="tiles"></div>
   <div class="grid2">
     <div class="panel"><h2>Similarity distribution</h2>
-      <div class="legend"><span><i style="background:var(--obs)"></i>discovered papers</span><span><i style="background:var(--null)"></i>random baseline (null)</span><span><i style="background:var(--c1)"></i>mixture components</span><span><i style="background:var(--ink)"></i>thresholds</span></div>
+      <div class="legend"><span><i style="background:var(--obs)"></i>discovered papers (score: similarity to seeds + topic)</span><span><i style="background:var(--null)"></i>random baseline (null)</span><span><i style="background:var(--c1)"></i>mixture components</span><span><i style="background:var(--ink)"></i>thresholds</span></div>
       <div id="hist"></div></div>
     <div class="panel"><h2>Progress</h2>
       <div class="legend"><span><i style="background:var(--obs)"></i>relevant papers found</span><span><i style="background:var(--c2)"></i>estimated recall</span><span><i style="background:var(--c3)"></i>rediscovery rate</span></div>
@@ -97,7 +97,9 @@ function render(m){
   $('sub').textContent=`${m.state} · topic: ${(m.run&&m.run.topic)||'–'} · updated ${new Date(m.updated*1000).toLocaleTimeString()}`;
   const seg=m.segments||{},rc=m.recapture||{};
   const tiles=[['Papers scored',m.papers],['Core',seg.core],['Candidate',seg.candidate],['τ_rel ('+m.thresholds.source+')',f3(m.thresholds.rel)],
-    ['Null q99',f3(m.null.q99)],['Est. recall',rc.recall_est==null?'–':(rc.recall_est*100).toFixed(0)+'%'],['Rediscovery',rc.rediscovery==null?'–':(rc.rediscovery*100).toFixed(0)+'%'],['Cost',`$${(m.cost_usd||0).toFixed(3)}`]];
+    ['LLM-confirmed relevant',m.judged?`${m.judged.relevant} / ${m.judged.total} judged`:'–'],['Promoted seeds',m.promoted??'–'],['Search rounds',m.search_rounds??'–'],
+    ['Null q99',f3(m.null.q99)],['Est. recall',rc.recall_est==null?'–':(rc.recall_est*100).toFixed(0)+'%'],['Rediscovery',rc.rediscovery==null?'–':(rc.rediscovery*100).toFixed(0)+'%'],
+    ['Cost'+(m.state==='done'?' (total)':''),`$${(m.cost_usd||0).toFixed(3)}`]];
   $('tiles').innerHTML=tiles.map(([k,v])=>`<div class="tile"><b>${v??'–'}</b><span>${k}</span></div>`).join('');
   $('hist').innerHTML=histSvg(m);
   $('calib').innerHTML=calibSvg(m);

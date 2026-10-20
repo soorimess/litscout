@@ -8,9 +8,12 @@ which papers are useless, which are the most related, and when to give up on a s
 
 - Seeds `s_1 … s_k`, embeddings `e(·)`, all L2-normalised.
 - Per-seed similarity of a paper `p`: `c_i(p) = cos(e(p), e(s_i))`.
-- Paper score: `c(p) = max_i c_i(p)`, attributed to the nearest seed `i*(p) = argmax_i c_i(p)`.
-  The maximum keeps multi-topic seed sets from averaging each other out. The centroid similarity
-  `cos(e(p), mean(e(s_i)))` is stored as well, for diagnostics.
+- Paper score: `c(p) = 0.7 · cos(e(p), centroid) + 0.3 · cos(e(p), e(topic))`, where the centroid is the
+  normalised mean of the seed embeddings and `e(topic)` embeds the topic as an instructed query. The
+  paper is attributed to its nearest seed `i*(p) = argmax_i c_i(p)`.
+  On the first end-to-end run's 795 LLM labels, the AUC was 0.878 for the earlier `max_i c_i(p)`, 0.907
+  for the centroid alone and 0.911 for this mix. The random baseline is scored the same way, and both
+  are rescored when a seed is promoted.
 - Every discovered paper also records the seed whose crawl found it, the direction (backward through
   references or forward through citations), and its depth.
 
@@ -130,6 +133,8 @@ Treat each seed's crawl as an independent "capture" of the relevant population.
   example 0.95) and the relevant papers still queued for expansion are at most `1 − target` of those
   found, or every seed is exhausted. Without the queue check, overlapping seeds give `N̂` ≈ found and
   the crawl stopped with relevant papers still waiting (first end-to-end run).
+- Only citation crawls count as captures: papers found by keyword search (direction `search`) are
+  counted as found but not as captures, and seeds with fewer than 10 relevant captures are left out.
 - Caveat: crawls from different seeds share the citation graph, so they are not independent. The
   overlap is inflated and `N̂` underestimates. Treat it as a signal, not a guarantee.
 
@@ -163,9 +168,10 @@ So the monitor asks the LLM directly, in small amounts:
 | Decision | Rule |
 |---|---|
 | Thresholds | M9 LLM calibration once enough labels exist; before that the M2 mixture anchored by the M1 field null; refit every 200 papers; M3 knee as a cross-check |
-| Expand a paper | `c(p) ≥ τ_rel`, best-first per seed (M6) |
+| Expand a paper | `c(p) ≥ τ_rel`, best-first per seed (M6); every LLM-confirmed paper whatever its score, in both directions, even after its seed was given up; never an LLM-rejected paper below `τ_core` |
+| LLM checks during the crawl | probes (M9); once calibrated, every paper `≥ τ_drop`; promotion of LLM 9–10 papers to seeds; keyword searches from confirmed papers |
 | Give up on a seed | frontier maximum `< τ_rel` (M6), or EWMA yield `< 2%` for 3 windows of 100 (M4), or the deepest levels in both directions indistinguishable from the null or almost free of relevant papers (M5) |
-| Global stop | all seeds given up, or estimated recall ≥ 0.95 (M7) with rediscovery ≥ 0.8 (M8), or a budget cap (papers, API calls, money) |
+| Global stop | all seeds given up, or estimated recall ≥ 0.95 (M7) with rediscovery ≥ 0.8 (M8) and almost no relevant papers queued, or a budget cap; confirmed papers still queued are expanded first |
 | Output segments | core / candidate / boundary / discard from the posterior (M9, else M2) |
 
 ## Live dashboard
@@ -181,18 +187,20 @@ The monitor writes one metrics snapshot per refit. The dashboard renders:
 6. Estimated total `N̂`, estimated recall and rediscovery rate over time (M7, M8).
 7. Decision log: every threshold change and every seed given up, with the rule that fired.
 
-## Final check: are the cosine ranking and the cut right?
+## Final check: are the ranking and the cut right?
 
-After the crawl stops, an LLM judge reads the title and abstract of selected papers against the topic.
+After the crawl stops, an LLM judge reads the title and abstract of papers against the review criteria
+(`criteria.md`).
 
-- **Reuse the M9 probe labels** and weight every judged paper by its segment's sampling rate.
-- **Judge all of core + candidate.** These are expected to be a few thousand papers, at roughly
-  $0.0003 per paper with the current model.
-- **Judge a stratified sample from boundary and discard** (for example 200 each). This estimates how
-  many relevant papers the cut misses, giving the recall at the cut.
+- **Reuse every judgment from the crawl** (probes and band checks) and weight each judged paper by its
+  segment's sampling rate.
+- **Judge every paper at or above `τ_drop`** (core, candidate, boundary), at about $0.00017 per paper.
+- **Top up a sample of the discard segment to 200 judged papers.** This estimates how many relevant
+  papers the crawl left below `τ_drop`.
+- **If the check confirms papers that were never expanded,** the crawl runs again (at most 3 passes).
 - **Evaluate the ranking against the LLM labels:**
-  - AUC of the cosine score
-  - Spearman correlation between the cosine score and the LLM score
+  - AUC of the score
+  - Spearman correlation between the score and the LLM score
   - precision@k curve
   - per-seed AUC, to find seeds that pull in off-topic regions
 - **Calibrate:** fit isotonic regression from cosine score to P(LLM says relevant), then choose the

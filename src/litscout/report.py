@@ -8,8 +8,9 @@ from typing import Any
 
 from .store import Store
 
-COLUMNS = ["Rank", "In final list", "Segment", "Title", "Year", "URL", "Abstract", "Cosine (best seed)",
-           "Nearest seed", "P(relevant)", "Final score", "LLM score", "LLM reason", "Found via", "Venue", "Citations"]
+COLUMNS = ["Rank", "In final list", "Segment", "Title", "Year", "URL", "Abstract", "Score", "Similarity to seeds",
+           "Similarity to topic", "Nearest seed", "P(relevant)", "Final score", "LLM score", "LLM reason", "Found via",
+           "Venue", "Citations"]
 
 
 def _url(p: dict[str, Any]) -> str:
@@ -38,11 +39,15 @@ def _rows(store: Store) -> list[dict[str, Any]]:
         out.append({
             "In final list": "seed" if p["segment"] == "seed" else ("yes" if p["finc"] else ("no" if p["finc"] is not None else "")),
             "Segment": p["segment"], "Title": p["title"], "Year": p["year"], "URL": _url(p), "Abstract": p["abstract"] or "",
-            "Cosine (best seed)": round(p["best"], 4), "Nearest seed": p["seed_name"],
+            "Score": round(p["best"], 4),
+            "Similarity to seeds": round(p["centroid"], 4) if p["centroid"] is not None else "",
+            "Similarity to topic": round(p["topic"], 4) if p.get("topic") is not None else "",
+            "Nearest seed": p["seed_name"],
             "P(relevant)": round(p["posterior"], 4) if p["posterior"] is not None else "",
             "Final score": round(p["fscore"], 4) if p["fscore"] is not None else "",
             "LLM score": p["jscore"] if p["jscore"] is not None else "", "LLM reason": p["jreason"] or "",
-            "Found via": f"{v['name']}: {v['back']} back, {v['fwd']} forward" if v else "seed",
+            "Found via": ("keyword search" if v["direction"] == "search" else f"{v['name']}: {v['back']} back, {v['fwd']} forward")
+                         if v else "seed",
             "Venue": p["venue"] or "", "Citations": p["cited_by"] if p["cited_by"] is not None else "",
             "_sort": (p["segment"] != "seed", -(p["fscore"] if p["fscore"] is not None else p["best"])),
         })
@@ -82,14 +87,16 @@ def export(store: Store, run_dir: Path) -> Path:
         ws.auto_filter.ref = ws.dimensions
     ws = wb.create_sheet("Seeds")
     ws.append(["Name", "Title", "Origin", "Reason", "Expandable", "Given up"])
+    # promoted seeds are listed here and in the final list
     given_up = store.meta("given_up", {})
     for r in store.q("SELECT s.*, p.title FROM seeds s JOIN papers p ON p.id = s.id"):
         ws.append([r["name"], r["title"], r["origin"], r["reason"], bool(r["expandable"]), given_up.get(r["id"], "")])
     ws = wb.create_sheet("Run summary")
-    for k in ("run", "topic", "null", "thresholds", "validation", "cost_usd", "state"):
+    for k in ("run", "topic", "criteria", "null", "thresholds", "validation", "cost_usd", "state", "queries", "crawl_queries"):
         ws.append([k, json.dumps(store.meta(k), ensure_ascii=False)])
     wb.save(out_dir / "papers.xlsx")
-    summary = {k: store.meta(k) for k in ("run", "topic", "null", "thresholds", "validation", "cost_usd", "state")}
+    summary = {k: store.meta(k) for k in ("run", "topic", "criteria", "null", "thresholds", "validation", "cost_usd", "state",
+                                          "queries", "crawl_queries")}
     summary["counts"] = {r["segment"] or "unscored": r["n"] for r in store.q("SELECT segment, COUNT(*) AS n FROM papers GROUP BY segment")}
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return out_dir

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS papers (
   id TEXT PRIMARY KEY, openalex TEXT, doi TEXT, arxiv TEXT, title TEXT, title_norm TEXT, abstract TEXT,
   year INTEGER, venue TEXT, cited_by INTEGER, subfield_id TEXT, subfield TEXT, oa_pdf TEXT,
-  best REAL, best_seed TEXT, centroid REAL, posterior REAL, segment TEXT,
+  best REAL, best_seed TEXT, centroid REAL, topic REAL, posterior REAL, segment TEXT,
   expanded INTEGER DEFAULT 0, created REAL);
 CREATE INDEX IF NOT EXISTS ix_papers_doi ON papers(doi);
 CREATE INDEX IF NOT EXISTS ix_papers_arxiv ON papers(arxiv);
@@ -35,8 +35,11 @@ CREATE TABLE IF NOT EXISTS frontier (
   PRIMARY KEY (seed_id, paper_id));
 CREATE INDEX IF NOT EXISTS ix_frontier ON frontier(seed_id, state, priority);
 CREATE TABLE IF NOT EXISTS null_scores (paper_id TEXT PRIMARY KEY, title TEXT, best REAL);
+CREATE TABLE IF NOT EXISTS null_embeddings (paper_id TEXT PRIMARY KEY, vec BLOB);
 CREATE TABLE IF NOT EXISTS judgments (
   paper_id TEXT PRIMARY KEY, stratum TEXT, score INTEGER, relevant INTEGER, reason TEXT, model TEXT);
+CREATE TABLE IF NOT EXISTS judgments_archive (
+  paper_id TEXT, stratum TEXT, score INTEGER, relevant INTEGER, reason TEXT, model TEXT, criteria_hash TEXT, archived REAL);
 CREATE TABLE IF NOT EXISTS events (at REAL, kind TEXT, rule TEXT, payload TEXT);
 """
 PAPER_COLS = ("id", "openalex", "doi", "arxiv", "title", "abstract", "year", "venue", "cited_by",
@@ -50,6 +53,9 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
+        cols = {r[1] for r in self.db.execute("PRAGMA table_info(papers)")}
+        if "topic" not in cols:  # stores created before the topic score existed
+            self.db.execute("ALTER TABLE papers ADD COLUMN topic REAL")
         self.lock = threading.RLock()
         self.dtype = np.dtype(dtype)
 
@@ -126,3 +132,23 @@ class Store:
 
     def has_embedding(self, pid: str) -> bool:
         return bool(self.q("SELECT 1 FROM embeddings WHERE paper_id=?", (pid,)))
+
+    def put_null_embeddings(self, ids: list[str], mat: np.ndarray) -> None:
+        self.many("INSERT OR REPLACE INTO null_embeddings VALUES (?, ?)",
+                  [(i, v.astype(self.dtype).tobytes()) for i, v in zip(ids, mat)])
+
+    def null_embeddings(self) -> tuple[list[str], np.ndarray]:
+        rows = self.q("SELECT paper_id, vec FROM null_embeddings ORDER BY paper_id")
+        if not rows:
+            return [], np.zeros((0, 0), dtype=np.float32)
+        return [r["paper_id"] for r in rows], np.stack(
+            [np.frombuffer(r["vec"], dtype=self.dtype).astype(np.float32) for r in rows])
+
+    def archive_judgments(self, criteria_hash: str) -> int:
+        """Move judgments made under other review criteria out of the active table."""
+        with self.lock:
+            n = self.q("SELECT COUNT(*) AS n FROM judgments")[0]["n"]
+            if n:
+                self.x("INSERT INTO judgments_archive SELECT *, ?, ? FROM judgments", (criteria_hash, time.time()))
+                self.x("DELETE FROM judgments")
+            return n

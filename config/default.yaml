@@ -16,7 +16,15 @@ embedding:
   batch_size: 64
   store_dtype: float16               # 4096-dim vectors: 8 KB each instead of 16 KB
 
-null:
+scoring:
+  # Paper score = (1 - topic_weight) * similarity to the seed centroid + topic_weight * similarity to the
+  # topic query. On the first end-to-end run (795 LLM labels) the AUC was 0.878 for max-over-seeds,
+  # 0.907 for the centroid and 0.911 for 0.7 centroid + 0.3 topic.
+  method: centroid                   # centroid | max (maximum over seeds)
+  topic_weight: 0.3
+  topic_instruction: "Given the topic of a systematic literature review, retrieve titles and abstracts of papers that belong in the review"
+
+baseline:                            # random papers for the null (background) distribution
   sample_size: 2000                  # random papers for the background distribution
   scope: field                       # field: seeds' most common OpenAlex subfield; global: no filter
   random_seed: 42
@@ -28,6 +36,15 @@ crawl:
   max_citations: 1000
   max_depth: null                    # optional hard limit per direction; stopping rules decide otherwise
   min_year: null
+  max_passes: 3                      # crawl + final check repeated while confirmed papers are left unexpanded
+  confirm: {enabled: true, max_per_fit: 2000}    # LLM judges every unjudged paper >= tau_drop at each refit
+  promote: {min_llm: 9, max_total: 5, max_per_fit: 2}   # strong finds become seeds
+  search:                            # keyword searches written from the confirmed papers
+    rounds: 5
+    every_new_relevant: 15           # a new round after this many new confirmed papers
+    queries: 5
+    examples: 25
+    per_query: {openalex: 25, arxiv: 25, crossref: 15}
 
 monitor:
   refit_every: 200                   # new papers between refits
@@ -40,10 +57,11 @@ monitor:
   # M9: at each refit the LLM judges up to per_fit papers spread over the score range; once there are
   # min_labels labels (min_each of each class), a logistic fit of P(relevant | cosine) sets the thresholds.
   probe: {per_fit: 40, max_labels: 400, min_labels: 40, min_each: 5, bins: 8, C: 10.0}
-  recapture: {target_recall: 0.95, min_rediscovery: 0.8}
+  recapture: {target_recall: 0.95, min_rediscovery: 0.8, min_captures: 10}
 
 validate:
-  sample_per_stratum: 200            # LLM-labelled sample from boundary and from discard
+  sample_per_stratum: 200            # LLM-labelled sample from discard (everything above it is judged)
+  max_judge: 20000                   # safety cap on papers judged above tau_drop
   target_recall: 0.95
   weak_auc: 0.8                      # below this, final ranking also uses the LLM score
   concurrency: 16

@@ -237,13 +237,14 @@ class Monitor:
                 "levels": lv, "cumulative": np.cumsum(rel)[::max(1, len(rel) // 200)].tolist() if rel else []}
 
     def _recapture(self) -> dict[str, Any]:
+        # Each seed's citation crawl is one capture; papers found by keyword search are not captures.
         sets: dict[str, set[str]] = {s: set() for s in self.seeds}
-        for pid, seed, *_ in self.events:
-            if self.scores.get(pid, -1) >= self.t.rel and seed in sets:
+        for pid, seed, direction, *_ in self.events:
+            if direction != "search" and self.scores.get(pid, -1) >= self.t.rel and seed in sets:
                 sets[seed].add(pid)
-        union = set().union(*sets.values()) if sets else set()
+        union = {pid for pid, c in self.scores.items() if c >= self.t.rel}
         ests = []
-        names = list(sets)
+        names = [s for s in sets if len(sets[s]) >= self.cfg.get("recapture", {}).get("min_captures", 10)]
         for i in range(len(names)):
             for j in range(i + 1, len(names)):
                 a, b = sets[names[i]], sets[names[j]]

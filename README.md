@@ -2,33 +2,40 @@
 
 A systematic literature review system. It starts from seed papers (a folder of PDFs) or from a topic,
 snowballs through the citation graph in both directions, ranks every discovered paper by embedding
-similarity to the seeds, decides live when a seed stops yielding relevant papers, and confirms the
-most related segment with an LLM.
+similarity to the seeds and the topic, decides live when a seed stops yielding relevant papers, and
+has an LLM screen the uncertain papers against written review criteria.
 
 ## How it works
 
 1. **Seeds**
    - PDF folder: each PDF's DOI, arXiv id or title is resolved on OpenAlex. Papers that can't be
      resolved still anchor the similarity but can't be expanded.
-   - Topic: the LLM turns the topic into search queries; OpenAlex, arXiv, Crossref and DBLP are
-     searched; the pool is ranked by embedding similarity to the topic and cut to `SEED_POOL_MAX`;
-     the LLM picks the N most relevant papers from their titles and abstracts.
-2. **Random baseline:** about 2,000 random papers from the seeds' OpenAlex subfield are embedded and
-   scored against the seeds. They show what an unrelated paper in the same field scores.
-3. **Snowball:** each seed has its own priority frontier and always expands its most similar paper
-   next, backward (references) and forward (citations). OpenAlex is the main graph source; Semantic
-   Scholar fills in where OpenAlex has no references or citations (common for recent preprints).
-   Every discovered paper is embedded (title + abstract) and scored against every seed.
-4. **Live monitor:** periodically refits thresholds and decides which seeds or directions to give up
-   and when to stop. At each refit the LLM judges a few papers spread over the score range, and a
-   logistic fit of those labels sets the thresholds (before enough labels exist, a mixture model
-   against the random baseline does). It also tracks per-seed yield,
-   drift by depth, frontier exhaustion, and capture–recapture recall. It writes `metrics.json` for
-   the dashboard. Details: [docs/distribution-analysis.md](docs/distribution-analysis.md).
-5. **LLM validation:** the LLM judges every core and candidate paper, plus a stratified sample below
-   them. The run reports how well the cosine ranking agrees with the LLM (AUC, Spearman,
-   precision@k), calibrates cosine to P(relevant), and chooses the cut for the target recall.
-6. **Export:** `runs/<run>/output/papers.xlsx` and `papers.csv`, with the final list, all scored
+   - Topic: the LLM turns the topic into search queries; OpenAlex, arXiv and Crossref are searched;
+     the pool is ranked by embedding similarity to the topic and cut to `SEED_POOL_MAX`; the LLM picks
+     the N most relevant papers from their titles and abstracts.
+2. **Review criteria:** the LLM drafts a definition and inclusion/exclusion criteria from the topic
+   and the seeds, written to `runs/<run>/criteria.md`. Edit them (or pass `--criteria FILE`); every
+   LLM judgment uses them.
+3. **Random baseline:** about 2,000 random papers from the seeds' OpenAlex subfield are embedded and
+   scored. They show what an unrelated paper in the same field scores.
+4. **Snowball:** each seed has its own priority frontier and expands its best-scored paper next,
+   backward (references) and forward (citations). OpenAlex is the main graph source; Semantic Scholar
+   fills in for recent preprints. Every paper is embedded (title + abstract) and scored as
+   0.7 × similarity to the seed centroid + 0.3 × similarity to the topic.
+5. **Live monitor and LLM steps,** every 200 new papers:
+   - the LLM judges a few papers spread over the score range, and a logistic fit of those labels sets
+     the thresholds;
+   - it then judges every paper above the lowest threshold; confirmed papers are always expanded,
+     rejected ones are not;
+   - papers the LLM rates 9–10 become new seeds;
+   - keyword searches written from the confirmed papers add recent papers the citation graph misses;
+   - per-seed yield, depth drift, frontier exhaustion and capture–recapture decide which seeds to give
+     up and when to stop. Details: [docs/distribution-analysis.md](docs/distribution-analysis.md).
+6. **Final check:** the LLM judges the remaining papers above the lowest threshold and a sample below
+   it. The run reports how well the score ranking agrees with the LLM (AUC, Spearman, precision@k),
+   calibrates the score to P(relevant), and chooses the cut for the target recall. Confirmed papers
+   that were never expanded trigger another crawl pass (at most 3).
+7. **Export:** `runs/<run>/output/papers.xlsx` and `papers.csv`, with the final list, all scored
    papers, seeds and run summary.
 
 Design documents:
@@ -55,6 +62,7 @@ pytest -q                 # unit tests for the monitor math and record handling
 | `OPENALEX_API_KEY`, `S2_API_KEY` | optional: own quotas for OpenAlex and Semantic Scholar |
 | `CONTACT_EMAIL` | polite-pool contact for OpenAlex and Crossref |
 | `MAX_PAPERS`, `MAX_COST_USD` | budget caps per run |
+| `DASHBOARD_PASSWORD` | optional dashboard password (user name `review`) |
 
 Tuning (thresholds, window sizes, null sample size, pricing) is in `config/default.yaml`.
 
@@ -63,6 +71,8 @@ Tuning (thresholds, window sizes, null sample size, pricing) is in `config/defau
 ```bash
 litscout run --topic "machine learning for weather forecasting" --seeds 5   # topic mode
 litscout run --seeds-dir ./my-seed-pdfs                         # PDF mode
+litscout run --topic "..." --review-criteria                    # stop to edit criteria.md, then resume
+litscout criteria <run>         # show the review criteria and where to edit them
 litscout dashboard <run>        # live dashboard at http://localhost:8765
 litscout dashboard <run> --host 0.0.0.0   # reachable from other machines (serves only the page and metrics.json)
 litscout status <run>           # thresholds, counts, decisions, cost
