@@ -18,7 +18,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=7"]
+dev = ["pytest>=7", "httpx>=0.27"]
+web = [
+  "fastapi>=0.115,<0.116",
+  "uvicorn[standard]>=0.32,<0.33",
+  "sqlalchemy>=2.0,<2.1",
+  "bcrypt>=4.2,<5",
+  "python-multipart>=0.0.20",
+]
 
 [project.scripts]
 litscout = "litscout.cli:main"
@@ -28,3 +35,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 litscout = ["dashboard/*.html"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "backend/tests"]

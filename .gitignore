@@ -6,3 +6,12 @@ runs/
 .pytest_cache/
 .DS_Store
 ~$*
+
+# web app
+backend/data/
+frontend/node_modules/
+frontend/dist/
+
+
+# seed PDFs copied to the server for experiments
+seeds/

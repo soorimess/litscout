@@ -30,6 +30,9 @@ Phase 2 (for example a RAG system over the selected papers) is out of scope for 
 
 ## Architecture
 
+Two ways in: the `litscout` command line, and the web app (below), which runs the same pipeline
+as separate processes for signed-in users.
+
 ```mermaid
 flowchart LR
     U[User / CLI] --> SR{Input mode}
@@ -184,6 +187,49 @@ page and the metrics file, optionally behind a password.
   raw score breaking ties.
 - If it confirms papers that were never expanded, the crawl runs again (at most 3 passes in total).
 
+### Web app
+`backend/` (FastAPI) and `frontend/` (React + TypeScript, built with Vite) on one server process,
+port 8080, managed by systemd (`deploy/litscout-web.service`).
+
+```mermaid
+flowchart LR
+    B[Browser<br/>React app] -->|cookie session,<br/>JSON over HTTP| API[FastAPI<br/>auth, jobs, results]
+    API --> WDB[(web.db<br/>users, sessions, jobs)]
+    API --> JR[Job runner<br/>queue, max 2 at once]
+    JR -->|spawns| P[litscout run / resume<br/>own process per review]
+    P --> RS[(runs/&lt;run&gt;/store.sqlite<br/>metrics.json, job.log, output/)]
+    API -->|read-only| RS
+    B -.uploads PDFs.-> API
+    API -.temporary.-> UP[uploads/&lt;job&gt;<br/>deleted after seed import]
+    UP -.-> P
+```
+
+- **Accounts:** no sign-up; an administrator creates users (`python -m app.cli create-user --random`).
+  Passwords are stored as bcrypt hashes; sessions are random tokens kept as SHA-256 hashes, sent in an
+  httpOnly, SameSite=Strict cookie (7 days). Sign-in is limited to 5 attempts per minute per address,
+  and an unknown user takes as long to reject as a wrong password.
+- **Requests:** every write must carry `X-Requested-With: LitScout` (a cross-site form can't), on
+  top of the SameSite cookie. Responses carry a strict Content-Security-Policy, `X-Frame-Options:
+  DENY`, `nosniff` and `no-store` for the API. Users see only their own reviews (others get 404).
+- **Jobs:** a review is a row in `web.db` pointing at its run folder `runs/web-<id>`. The runner starts
+  queued jobs (at most `WEB_MAX_CONCURRENT_JOBS`), each as `python -m litscout run …` in its own
+  session with its cost limit in the environment, and polls them every 2 s. Outcome comes from the
+  exit code and the log written since that attempt started: finished, failed (with the last error
+  line), stopped, or waiting for criteria (`--review-criteria`). Stop sends SIGTERM to the job's
+  process group; Continue runs `litscout resume --recrawl`. Jobs survive a restart of the web app
+  (`KillMode=process`; tracked by pid).
+- **Uploads:** PDFs only (checked by extension and `%PDF-` header), at most 20 files of 25 MB, names
+  sanitised. They are deleted as soon as the seed step has finished; the store keeps only the papers'
+  metadata and links (DOI, arXiv, OpenAlex, GitHub URL). Paper files are never stored.
+- **Results:** the API reads each run's SQLite store read-only: progress (stage from the log, the
+  dashboard metrics, a filtered log tail), the paper table (views: final list, LLM-confirmed, seeds,
+  all; search; sort; pagination), one paper's details (abstract, LLM reason, similarities, how it was
+  found), seeds, criteria (editable while paused or finished) and the Excel/CSV exports.
+- **Frontend pages:** sign-in; reviews list (auto-refresh); new review (topic or PDF drag-and-drop,
+  "let me check the criteria first", cost limit); review page with a stage stepper and tabs for
+  Progress (tiles, score histogram, LLM calibration plot, seeds, decisions, log), Results (table and
+  paper drawer), Review criteria (edit, save and continue or re-run) and Seed papers.
+
 ### Reporter
 Exports `papers.xlsx` (Final list, All scored papers, Seeds, Run summary), `papers.csv` and
 `summary.json` (criteria, queries, thresholds, validation, cost).
@@ -202,6 +248,7 @@ Exports `papers.xlsx` (Final list, All scored papers, Seeds, Run summary), `pape
 | `CONTACT_EMAIL` | polite-pool header for OpenAlex and Crossref |
 | `MAX_PAPERS`, `MAX_COST_USD` | budget caps for a run |
 | `DASHBOARD_PASSWORD` | optional password for the dashboard (user name `review`) |
+| `WEB_*` | web app limits and paths ([deploy/README.md](../deploy/README.md)) |
 
 Tuning (scoring weights, thresholds, probe and confirm sizes, promotion and search limits) is in
 `config/default.yaml`.
@@ -345,6 +392,7 @@ searches.
 | Grey literature | GitHub repositories are searched with the crawl-time queries. Datasets, tools and benchmarks from industry often have a repository and a blog post but no paper. |
 | Topic from seeds | Field-level, never the seeds' own method; the same rule for the drafted criteria. |
 | Dashboard | Static HTML page reloading `metrics.json`; served without the store or outputs, optional password. |
+| Web app | FastAPI + SQLite for accounts and jobs, the pipeline unchanged as a subprocess per review; React frontend served by the same process. Plain HTTP for now (no domain for a certificate); `WEB_COOKIE_SECURE` once behind HTTPS. |
 | Vector storage | float16 (half the size of float32, no measurable effect on ranking). |
 
 ## Open questions

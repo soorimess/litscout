@@ -67,6 +67,12 @@ pytest -q                 # unit tests for the monitor math and record handling
 
 Tuning (thresholds, window sizes, null sample size, pricing) is in `config/default.yaml`.
 
+## Web app
+
+A browser front end for the same pipeline: sign in, start a review from a topic or seed PDFs, watch it
+run, edit the review criteria, browse and export the results. Backend in `backend/` (FastAPI), frontend
+in `frontend/` (React + TypeScript). Install, deploy and settings: [deploy/README.md](deploy/README.md).
+
 ## Usage
 
 ```bash

@@ -1,6 +1,6 @@
 # Sequence diagrams
 
-Six flows, in the order a run executes them. Component names match [system-design.md](system-design.md).
+Seven flows: six in the order a run executes them, then the web app. Component names match [system-design.md](system-design.md).
 
 ## 1. Seeds from a topic (topic mode)
 
@@ -214,4 +214,49 @@ sequenceDiagram
     end
     CLI->>RP: export
     RP->>DB: papers.xlsx, papers.csv, summary.json
+```
+
+## 7. Web app: start a review, watch it, browse results
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User
+    participant UI as Browser (React)
+    participant API as FastAPI
+    participant WDB as web.db
+    participant JR as Job runner
+    participant P as litscout process
+    participant RS as runs/<run>
+
+    User->>UI: sign in
+    UI->>API: POST /api/auth/login
+    API->>WDB: check bcrypt hash, store session token hash
+    API-->>UI: httpOnly SameSite=Strict cookie
+    User->>UI: new review (topic, or PDFs)
+    UI->>API: POST /api/jobs (multipart, X-Requested-With)
+    API->>API: validate topic / PDF type, size, count; cost limit
+    API->>WDB: job row (queued); PDFs to uploads/<job>
+    loop every 2 s
+        JR->>WDB: queued jobs, running count
+        JR->>P: spawn run (own session, MAX_COST_USD) when a slot is free
+        JR->>P: poll exit code / pid
+        JR->>RS: criteria.md exists -> delete uploads/<job>
+        JR->>WDB: status: completed / failed / cancelled / awaiting_criteria
+    end
+    P->>RS: store.sqlite, metrics.json, job.log, criteria.md, output/
+    loop every 4 s while running
+        UI->>API: GET /api/jobs/<id>, /progress
+        API->>RS: read-only: stage from log, metrics, log tail
+        API-->>UI: status, stage, tiles, charts, decisions
+    end
+    opt paused for criteria
+        User->>UI: edit criteria, save and continue
+        UI->>API: PUT /criteria, POST /resume
+        API->>WDB: job queued again -> runner spawns resume --recrawl
+    end
+    User->>UI: browse results
+    UI->>API: GET /papers?view&q&sort&page, /paper?pid, /seeds, /export/xlsx
+    API->>RS: read-only queries
+    API-->>UI: rows, details, file
 ```
