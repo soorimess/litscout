@@ -15,3 +15,4 @@ frontend/dist/
 
 # seed PDFs copied to the server for experiments
 seeds/
+frontend/*.tsbuildinfo
