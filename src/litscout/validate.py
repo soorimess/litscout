@@ -118,7 +118,9 @@ def validate(s: Settings, store: Store, llm: LLM, run_dir: Path) -> dict[str, An
     for r in allp:
         p_cal = float(iso.predict([r["best"]])[0])
         j = judged.get(r["id"])
-        score = 0.5 * p_cal + 0.5 * j["score"] / 10 if (weak and j) else p_cal
+        # Judged papers rank by the LLM score and the calibrated score together (the LLM read the
+        # abstract); isotonic calibration is a step function, so the raw score breaks its ties.
+        score = (0.5 * p_cal + 0.5 * j["score"] / 10 if j else p_cal) + 1e-3 * r["best"]
         include = (bool(j["relevant"]) if j else (r["best"] >= cut and p_cal >= 0.5))
         final.append((score, int(include), r["id"]))
     store.x("CREATE TABLE IF NOT EXISTS final (paper_id TEXT PRIMARY KEY, score REAL, include INTEGER)")
@@ -128,7 +130,8 @@ def validate(s: Settings, store: Store, llm: LLM, run_dir: Path) -> dict[str, An
         "precision_at": {str(k): round(v, 4) for k, v in prec_at.items()}, "per_seed_auc": per_seed,
         "cut": round(cut, 4), "target_recall": target, "est_precision_at_cut": round(est_prec, 4) if est_prec else None,
         "est_relevant_left_in_discard": round(missed, 1) if missed is not None else None,
-        "ranking": "calibrated score + LLM score (score AUC below threshold)" if weak else "calibrated score",
+        "ranking": "judged: 0.5 calibrated score + 0.5 LLM score; others: calibrated score; ties by score",
+        "score_ranking_weak": weak,
         "final_included": sum(inc for _, inc, _ in final),
         "criteria_hash": store.meta("criteria_hash"),
     }

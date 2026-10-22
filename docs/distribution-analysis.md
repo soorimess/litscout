@@ -205,5 +205,7 @@ After the crawl stops, an LLM judge reads the title and abstract of papers again
   - per-seed AUC, to find seeds that pull in off-topic regions
 - **Calibrate:** fit isotonic regression from cosine score to P(LLM says relevant), then choose the
   final cut for a target recall or the best F1.
-- **If the cosine ranking is weak** (AUC below about 0.8), report it and rank the final output by a
-  combination of the calibrated cosine probability and the LLM score, instead of cosine alone.
+- **Final order:** judged papers rank by 0.5 × calibrated probability + 0.5 × LLM score / 10, the
+  others by the calibrated probability; the raw score breaks ties (isotonic calibration is a step
+  function, which left the order inside a step arbitrary). A score AUC below 0.8 is reported as a weak
+  ranking.

@@ -204,9 +204,7 @@ sequenceDiagram
         end
         VA->>VA: AUC, Spearman, precision@k, per-seed AUC (weighted by segment sampling rate)
         VA->>VA: isotonic calibration score -> P(relevant), cut for target recall, relevant left in discard
-        alt score ranking weak (AUC < 0.8)
-            VA->>VA: rank by calibrated score combined with LLM score
-        end
+        VA->>VA: order: 0.5 calibrated + 0.5 LLM score (judged), ties by raw score; flag AUC < 0.8 as weak
         VA->>DB: final list
         alt confirmed papers not yet expanded
             CLI->>DB: state = crawling, next pass

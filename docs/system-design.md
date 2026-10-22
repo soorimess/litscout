@@ -180,6 +180,8 @@ page and the metrics file, optionally behind a password.
   weighting each judged paper by its segment's sampling rate.
 - Calibrates score to P(relevant) with isotonic regression, chooses the cut for the target recall, and
   estimates how many relevant papers remain in the discard segment.
+- Orders the final list by 0.5 × calibrated probability + 0.5 × LLM score / 10 for judged papers, with the
+  raw score breaking ties.
 - If it confirms papers that were never expanded, the crawl runs again (at most 3 passes in total).
 
 ### Reporter
