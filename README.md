@@ -60,6 +60,7 @@ pytest -q                 # unit tests for the monitor math and record handling
 | `EMBEDDING_MODEL` | embedding model, default `qwen/qwen3-embedding-8b` |
 | `SEED_POOL_MAX` | topic mode: candidate pool size before the LLM picks seeds |
 | `OPENALEX_API_KEY`, `S2_API_KEY` | optional: own quotas for OpenAlex and Semantic Scholar |
+| `GITHUB_TOKEN` | optional: faster GitHub repository search, with READMEs (grey literature) |
 | `CONTACT_EMAIL` | polite-pool contact for OpenAlex and Crossref |
 | `MAX_PAPERS`, `MAX_COST_USD` | budget caps per run |
 | `DASHBOARD_PASSWORD` | optional dashboard password (user name `review`) |

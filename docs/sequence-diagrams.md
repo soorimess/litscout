@@ -62,8 +62,8 @@ sequenceDiagram
         end
         SI->>DB: store seed
     end
-    CLI->>LLM: describe the topic the seeds share
-    LLM-->>CLI: topic paragraph
+    CLI->>LLM: name the review topic: field + kind of contribution, not the seeds' methods
+    LLM-->>CLI: topic (at most 40 words)
     CLI->>DB: store topic
 ```
 
@@ -81,7 +81,7 @@ sequenceDiagram
     alt --criteria FILE given
         CLI->>F: copy the user's criteria
     else
-        CLI->>LLM: draft definition + inclusion + exclusion criteria from topic and seed abstracts
+        CLI->>LLM: draft definition + inclusion + exclusion criteria from topic and seed abstracts (scope, not the seeds' design)
         LLM-->>CLI: criteria
         CLI->>F: write criteria.md
         opt --review-criteria
@@ -171,8 +171,10 @@ sequenceDiagram
     opt 15 new confirmed papers since the last search (max 5 rounds)
         CE->>LLM: new keyword queries from confirmed titles and earlier queries
         LLM-->>CE: queries
-        CE->>SRC: search OpenAlex, arXiv, Crossref
+        CE->>SRC: search OpenAlex, arXiv, Crossref, GitHub
         SRC-->>CE: records
+        CE->>SRC: GitHub repo with an arXiv link in its README -> fetch that paper instead
+        CE->>CE: drop repos named like a paper already found (its code)
         CE->>DB: store, embed, score; queue those >= tau_drop (direction search)
     end
     CE->>CE: revive seeds given up by M6 whose queue now holds papers >= tau_rel

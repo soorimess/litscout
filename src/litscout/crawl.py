@@ -20,7 +20,7 @@ from .monitor import Decision, Monitor, Thresholds
 from .seeds import _search_all
 from .sources import Sources
 from .sources.http import SourceUnavailable
-from .sources.records import dedupe, merge
+from .sources.records import dedupe, merge, norm_title
 from .store import Store
 from .validate import judge_and_store
 
@@ -411,7 +411,8 @@ class Crawler:
                                  "Confirmed relevant papers:\n" + "\n".join(f"- {x}" for x in titles) +
                                  "\n\nQueries already used:\n" + "\n".join(f"- {q}" for q in used))
         queries = [q for q in out.get("queries", []) if isinstance(q, str) and q not in used][:k]
-        recs = dedupe(_search_all(self.src, queries, sc.get("per_query", {"openalex": 25, "arxiv": 25, "crossref": 15})))
+        recs = self._resolve_repos(_search_all(self.src, queries, sc.get("per_query", {"openalex": 25, "arxiv": 25, "crossref": 15})))
+        recs = dedupe(recs)
         self._fill_abstracts(recs)
         new_ids = []
         for r in recs:
@@ -436,6 +437,28 @@ class Crawler:
                          {"queries": queries, "hits": len(recs), "new": len(new_ids), "queued": len(queue)})
         log.info("search round %d: %d queries, %d hits, %d new papers, %d queued", rounds + 1, len(queries), len(recs), len(new_ids), len(queue))
         return len(new_ids)
+
+    def _resolve_repos(self, recs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """A GitHub repo whose README links an arXiv paper stands for that paper; other repos stay as
+        grey-literature records."""
+        out = []
+        for r in recs:
+            ax = r.pop("linked_arxiv", None)
+            if not ax:
+                # Without the README, a repo named like a paper already found (e.g. "wx-bench" for
+                # "WX-Bench: ...") is taken to be that paper's code and skipped.
+                name = norm_title((r.get("url") or "").rsplit("/", 1)[-1])
+                if r.get("type") == "repository" and len(name) >= 5 and self.store.q(
+                        "SELECT 1 FROM papers WHERE title_norm LIKE ? AND url IS NULL LIMIT 1", (name + "%",)):
+                    continue
+                out.append(r)
+                continue
+            try:
+                paper = self.src.openalex.get(ax) or next(iter(self.src.arxiv.get_many([ax])), None)
+            except SourceUnavailable:
+                paper = None
+            out.append(paper or r)
+        return out
 
     # -- main loop ------------------------------------------------------------------------------
     def _active(self) -> set[str]:

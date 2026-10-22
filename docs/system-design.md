@@ -45,6 +45,7 @@ flowchart LR
         CRX[Crossref]
         AX[arXiv]
         S2[Semantic Scholar]
+        GH[GitHub repos<br/>grey literature]
     end
     CR --> CE[Crawl Engine<br/>best-first per seed,<br/>backward + forward]
     CE -.uses.-> SA
@@ -74,17 +75,22 @@ rate limiting and retries with backoff. A failed expansion is retried up to 3 ti
 | arXiv | search, abstracts for preprints | free, about 1 request / 3 s |
 | Crossref | search | free, polite pool with contact email |
 | Semantic Scholar | references and citations when OpenAlex has none (common for recent arXiv preprints) | free but slow without `S2_API_KEY` |
+| GitHub | repository search during the crawl's keyword searches: benchmarks published as a repo, blog or leaderboard without a paper | 10 searches/min without `GITHUB_TOKEN`, 30 with; READMEs only with a token |
 | DBLP | disabled by default: the API answers scripts with an anti-bot page | — |
 
 Records are merged by OpenAlex id, DOI, arXiv id and normalised title. Unresolved reference strings and
-non-paper records (datasets, errata, replication packages) are dropped.
+non-paper records (datasets, errata, replication packages) are dropped. A GitHub repo whose README
+links an arXiv paper is replaced by that paper; a repo named like a paper already found (for example
+`wx-bench` for "WX-Bench: …") is taken to be its code and skipped; other repos are kept as records with venue
+"GitHub repository", their description and README as abstract, and stars as citations.
 
 ### Seed Importer (PDF mode)
 1. Extract text from each PDF. Find a DOI and arXiv id by pattern, and the title from PDF metadata or
    the largest text on the first page.
 2. Resolve the paper on OpenAlex (by DOI, arXiv id, else title search with a similarity check).
 3. If it can't be resolved, keep it as a local seed: it anchors the similarity but can't be expanded.
-4. The LLM writes a one-paragraph topic from the seeds' titles and abstracts.
+4. The LLM names the review topic from the seeds' titles and abstracts: the research area and the kind
+   of contribution, in at most 40 words, without the seeds' particular methods, data or settings.
 
 ### Seed Finder (topic mode)
 1. The LLM expands the topic into a few search queries; OpenAlex, arXiv and Crossref are searched.
@@ -95,7 +101,9 @@ non-paper records (datasets, errata, replication packages) are dropped.
 
 ### Review criteria
 After the seeds, the LLM drafts a definition plus 3–6 inclusion and 3–6 exclusion criteria from the
-topic and the seeds' abstracts (or the user supplies a file). They are written to
+topic and the seeds' abstracts (or the user supplies a file). The criteria describe the review's scope,
+never the seeds' own design: with a single seed, a first draft copied that paper's experimental setup into the criteria and
+rejected a central paper of the field. They are written to
 `runs/<run>/criteria.md`, and every LLM judgment in the run (probes, band check, final check) is made
 against that text. The file can be edited at any time; on the next `resume` or `validate`, judgments
 made under the old criteria are moved to `judgments_archive` and the papers are judged again.
@@ -140,8 +148,9 @@ Run at every refit, in this order:
 4. **Promote seeds:** papers with LLM score ≥ 9 and score ≥ `τ_rel` become seeds (at most 2 per refit,
    5 per run). They join the centroid, get their own frontier, and everything is rescored.
 5. **Search:** after every 15 new confirmed papers (at most 5 rounds), the LLM writes new keyword
-   queries from the confirmed titles and the earlier queries; the results are scored and queued like
-   crawl discoveries. This finds recent papers the citation graph doesn't link yet.
+   queries from the confirmed titles and the earlier queries. OpenAlex, arXiv, Crossref and GitHub are
+   searched; the results are scored and queued like crawl discoveries. This finds recent papers the
+   citation graph doesn't link yet, and work that exists only as a repository.
 
 ### Distribution Monitor
 Implements the methods in [distribution-analysis.md](distribution-analysis.md):
@@ -187,6 +196,7 @@ Exports `papers.xlsx` (Final list, All scored papers, Seeds, Run summary), `pape
 | `SEED_POOL_MAX` | topic mode: candidate pool size before LLM seed picking |
 | `OPENALEX_API_KEY` | optional, own OpenAlex quota |
 | `S2_API_KEY` | optional, Semantic Scholar quota (faster crawl of recent preprints) |
+| `GITHUB_TOKEN` | optional, faster GitHub repository search with READMEs |
 | `CONTACT_EMAIL` | polite-pool header for OpenAlex and Crossref |
 | `MAX_PAPERS`, `MAX_COST_USD` | budget caps for a run |
 | `DASHBOARD_PASSWORD` | optional password for the dashboard (user name `review`) |
@@ -330,6 +340,8 @@ searches.
 | Live thresholds | Calibrated by LLM probes (M9). The null alone can't separate the topic from its citation neighbourhood. |
 | Expansion | By score, plus every LLM-confirmed paper whatever its score. Cosine alone missed relevant papers whose neighbours are relevant. |
 | Seed promotion and searches | Strong finds become seeds; keyword searches from confirmed papers run during the crawl. Both target recent papers the citation graph links poorly. |
+| Grey literature | GitHub repositories are searched with the crawl-time queries. Datasets, tools and benchmarks from industry often have a repository and a blog post but no paper. |
+| Topic from seeds | Field-level, never the seeds' own method; the same rule for the drafted criteria. |
 | Dashboard | Static HTML page reloading `metrics.json`; served without the store or outputs, optional password. |
 | Vector storage | float16 (half the size of float32, no measurable effect on ranking). |
 

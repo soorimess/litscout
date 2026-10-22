@@ -44,7 +44,7 @@ crawl:
     every_new_relevant: 15           # a new round after this many new confirmed papers
     queries: 5
     examples: 25
-    per_query: {openalex: 25, arxiv: 25, crossref: 15}
+    per_query: {openalex: 25, arxiv: 25, crossref: 15, github: 10}   # github: repos without a paper (grey literature)
 
 monitor:
   refit_every: 200                   # new papers between refits

@@ -39,6 +39,7 @@ class Settings:
     seed_pool_max: int
     openalex_api_key: Optional[str]
     s2_api_key: Optional[str]
+    github_token: Optional[str]
     contact_email: Optional[str]
     max_papers: int
     max_cost_usd: float
@@ -67,6 +68,7 @@ def load_settings(config_path: Optional[str] = None) -> Settings:
         seed_pool_max=int(_env("SEED_POOL_MAX", "200")),
         openalex_api_key=_env("OPENALEX_API_KEY"),
         s2_api_key=_env("S2_API_KEY"),
+        github_token=_env("GITHUB_TOKEN"),
         contact_email=_env("CONTACT_EMAIL"),
         max_papers=int(_env("MAX_PAPERS", "100000")),
         max_cost_usd=float(_env("MAX_COST_USD", "20")),

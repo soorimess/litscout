@@ -16,7 +16,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS papers (
   id TEXT PRIMARY KEY, openalex TEXT, doi TEXT, arxiv TEXT, title TEXT, title_norm TEXT, abstract TEXT,
-  year INTEGER, venue TEXT, cited_by INTEGER, subfield_id TEXT, subfield TEXT, oa_pdf TEXT,
+  year INTEGER, venue TEXT, cited_by INTEGER, subfield_id TEXT, subfield TEXT, oa_pdf TEXT, url TEXT,
   best REAL, best_seed TEXT, centroid REAL, topic REAL, posterior REAL, segment TEXT,
   expanded INTEGER DEFAULT 0, created REAL);
 CREATE INDEX IF NOT EXISTS ix_papers_doi ON papers(doi);
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS judgments_archive (
 CREATE TABLE IF NOT EXISTS events (at REAL, kind TEXT, rule TEXT, payload TEXT);
 """
 PAPER_COLS = ("id", "openalex", "doi", "arxiv", "title", "abstract", "year", "venue", "cited_by",
-              "subfield_id", "subfield", "oa_pdf")
+              "subfield_id", "subfield", "oa_pdf", "url")
 
 
 class Store:
@@ -54,8 +54,9 @@ class Store:
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.executescript(SCHEMA)
         cols = {r[1] for r in self.db.execute("PRAGMA table_info(papers)")}
-        if "topic" not in cols:  # stores created before the topic score existed
-            self.db.execute("ALTER TABLE papers ADD COLUMN topic REAL")
+        for col, kind in (("topic", "REAL"), ("url", "TEXT")):  # columns added after the first stores
+            if col not in cols:
+                self.db.execute(f"ALTER TABLE papers ADD COLUMN {col} {kind}")
         self.lock = threading.RLock()
         self.dtype = np.dtype(dtype)
 

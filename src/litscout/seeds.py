@@ -35,9 +35,12 @@ it as a tool. Return a JSON object
 {{"seeds": [{{"index": <candidate number>, "reason": "<one sentence on why it is relevant>"}}]}}
 ordered from most to least relevant, with exactly {n} entries and no duplicates."""
 
-TOPIC_FROM_SEEDS = """You read the titles and abstracts of seed papers for a literature review and
-describe the research topic they share, in one paragraph of at most 80 words, specific enough to judge
-whether another paper belongs to the same review. Return a JSON object {"topic": "..."}."""
+TOPIC_FROM_SEEDS = """You read the titles and abstracts of the seed papers of a systematic literature
+review and name the review's topic: the research area and the kind of contribution the seeds make, in
+one or two sentences of at most 40 words (like a review title plus its scope). Describe the field, not
+the seeds: do not mention their particular methods, datasets, settings, metrics or findings, because the
+review must also include papers that make the same kind of contribution in other ways.
+Return a JSON object {"topic": "..."}."""
 
 
 def _seed_name(rec: dict[str, Any]) -> str:
@@ -113,8 +116,7 @@ def topic_from_seeds(store: Store, llm: LLM) -> str:
 
 # -- topic mode -------------------------------------------------------------------------------
 def _search_all(src: Sources, queries: list[str], per_query: dict[str, int]) -> list[dict[str, Any]]:
-    fns = {"openalex": src.openalex.search, "arxiv": src.arxiv.search, "crossref": src.crossref.search,
-           "dblp": src.dblp.search}
+    fns = {name: getattr(src, name).search for name, n in per_query.items() if n}  # openalex, arxiv, crossref, dblp, github
     out: list[dict[str, Any]] = []
     with ThreadPoolExecutor(8) as pool:
         futs = {pool.submit(fns[name], q, n): (name, q) for q in queries for name, n in per_query.items() if n}

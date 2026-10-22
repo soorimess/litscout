@@ -9,7 +9,7 @@ from typing import Any, Optional
 # Keys every source fills where it can. "id" is the canonical key in the store:
 # the OpenAlex work id when known, else doi:/arxiv:/local: forms.
 FIELDS = ("id", "openalex", "doi", "arxiv", "title", "abstract", "year", "venue",
-          "cited_by", "subfield_id", "subfield", "oa_pdf", "type")
+          "cited_by", "subfield_id", "subfield", "oa_pdf", "type", "url")
 NON_PAPER_TYPES = {"dataset", "paratext", "peer-review", "erratum", "editorial", "letter", "retraction",
                    "supplementary-materials", "grant", "standard"}
 NON_PAPER_TITLE = re.compile(r"^(replication package|supplementary|artifact for|dataset for|data for)\b", re.I)
@@ -32,6 +32,8 @@ def canonical_id(rec: dict[str, Any]) -> str:
         return f"doi:{rec['doi'].lower()}"
     if rec.get("arxiv"):
         return f"arxiv:{rec['arxiv']}"
+    if (rec.get("url") or "").startswith("https://github.com/"):
+        return "github:" + rec["url"][len("https://github.com/"):]
     return "local:" + hashlib.sha1(norm_title(rec.get("title")).encode()).hexdigest()[:16]
 
 

@@ -81,7 +81,7 @@ class Empty:
 
 class FakeSources:
     def __init__(self, w):
-        self.openalex, self.arxiv, self.crossref, self.dblp, self.s2 = FakeOpenAlex(w), Empty(), Empty(), Empty(), Empty()
+        self.openalex, self.arxiv, self.crossref, self.dblp, self.s2, self.github = FakeOpenAlex(w), Empty(), Empty(), Empty(), Empty(), Empty()
 
 
 class FakeLLM:
@@ -118,7 +118,9 @@ def test_pipeline_on_synthetic_graph(tmp_path):
     tuning["monitor"]["min_fit"] = 40
     tuning["crawl"]["workers"] = 2
     tuning["baseline"]["sample_size"] = 300
-    s = Settings("http://x", "k", "m", "e", 10, None, None, None, 100000, 100, tuning=tuning, runs_dir=tmp_path)
+    s = Settings(llm_base_url="http://x", llm_api_key="k", llm_model="m", embedding_model="e", seed_pool_max=10,
+                 openalex_api_key=None, s2_api_key=None, github_token=None, contact_email=None, max_papers=100000,
+                 max_cost_usd=100, tuning=tuning, runs_dir=tmp_path)
     w = World()
     run_dir = tmp_path / "syn"
     store = Store(run_dir / "store.sqlite")

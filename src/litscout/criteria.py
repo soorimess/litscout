@@ -20,7 +20,11 @@ You get the review topic and the titles and abstracts of its seed papers. Return
 with 3 to 6 inclusion and 3 to 6 exclusion criteria. Each criterion is one short, checkable sentence
 about the paper's main contribution, judged from its title and abstract. Exclusion criteria name the
 nearby work that is NOT part of the review (for example papers that only use the topic's data or tools
-for another purpose, or broader areas that merely contain the topic)."""
+for another purpose, or broader areas that merely contain the topic).
+The criteria define the review's scope, not the design of the seed papers: never require a particular
+method, data source, annotation scheme, setting, metric or experimental design that a seed happens to
+use. Another paper that makes the same kind of contribution in a different way must pass. Merely
+using a benchmark or dataset of the topic for another purpose is not enough to be included."""
 
 JUDGE_SYSTEM = """You screen candidate papers for a systematic literature review.
 

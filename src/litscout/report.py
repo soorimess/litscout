@@ -20,7 +20,7 @@ def _url(p: dict[str, Any]) -> str:
         return f"https://doi.org/{p['doi']}"
     if p.get("openalex"):
         return f"https://openalex.org/{p['openalex']}"
-    return ""
+    return p.get("url") or ""
 
 
 def _rows(store: Store) -> list[dict[str, Any]]:

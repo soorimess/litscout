@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ..config import Settings
 from .openalex import OpenAlex
+from .github import GitHub
 from .others import DBLP, Arxiv, Crossref
 from .semanticscholar import SemanticScholar
 
@@ -15,3 +16,4 @@ class Sources:
         self.arxiv = Arxiv(iv("arxiv", 3.1))
         self.dblp = DBLP(iv("dblp", 1.0))
         self.s2 = SemanticScholar(s.s2_api_key)
+        self.github = GitHub(s.github_token)
