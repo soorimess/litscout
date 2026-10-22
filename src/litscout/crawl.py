@@ -39,8 +39,10 @@ object {{"queries": [...], "repo_queries": [...]}}:
 - "queries": {k} new short keyword queries (3 to 8 words, no boolean operators or quotes) that would
   find relevant papers the earlier queries missed: other phrasings, sub-topics and named artefacts that
   appear in the confirmed titles;
-- "repo_queries": 3 new queries of 2 to 4 plain words for GitHub repository search, to find work in the
-  review's scope published as a repository (benchmarks, datasets, leaderboards) rather than a paper."""
+- "repo_queries": 3 queries of 2 to 4 plain words for GitHub repository search, to find work in the
+  review's scope published as a repository (benchmarks, datasets, leaderboards) rather than a paper.
+  Unless it is among the repository queries already used, the first one is the review topic itself in
+  2 to 4 words (for example "weather forecasting models")."""
 
 
 class Crawler:
@@ -409,12 +411,14 @@ class Crawler:
             "SELECT p.title FROM judgments j JOIN papers p ON p.id = j.paper_id WHERE j.relevant=1 "
             "ORDER BY p.year DESC, j.score DESC LIMIT ?", (int(sc.get("examples", 25)),))]
         used = self.store.meta("queries", []) + self.store.meta("crawl_queries", [])
+        used_repo = self.store.meta("repo_queries", [])  # GitHub is a different index: its own history
         k = int(sc.get("queries", 5))
         out = self.llm.chat_json(SEARCH_SYSTEM.format(criteria=self.store.meta("criteria"), k=k),
                                  "Confirmed relevant papers:\n" + "\n".join(f"- {x}" for x in titles) +
-                                 "\n\nQueries already used:\n" + "\n".join(f"- {q}" for q in used))
+                                 "\n\nQueries already used:\n" + "\n".join(f"- {q}" for q in used) +
+                                 "\n\nRepository queries already used:\n" + "\n".join(f"- {q}" for q in used_repo))
         queries = [q for q in out.get("queries", []) if isinstance(q, str) and q not in used][:k]
-        repo_queries = [q for q in out.get("repo_queries", []) if isinstance(q, str) and q not in used][:3]
+        repo_queries = [q for q in out.get("repo_queries", []) if isinstance(q, str) and q not in used_repo][:3]
         per_query = dict(sc.get("per_query", {"openalex": 25, "arxiv": 25, "crossref": 15}))
         gh = per_query.pop("github", 0)
         hits = _search_all(self.src, queries, per_query)
@@ -439,12 +443,12 @@ class Crawler:
         self.store.many("INSERT INTO discoveries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
         self.store.many("INSERT OR IGNORE INTO frontier (seed_id, paper_id, priority, back, fwd, state) "
                         "VALUES (?, ?, ?, ?, ?, 'queued')", queue)
-        queries = queries + repo_queries
         self.store.set_meta("crawl_queries", self.store.meta("crawl_queries", []) + queries)
+        self.store.set_meta("repo_queries", used_repo + repo_queries)
         self.store.set_meta("search_rounds", rounds + 1)
         self.store.set_meta("search_last_relevant", n_rel)
         self.store.event("search", "keyword search from confirmed papers",
-                         {"queries": queries, "hits": len(recs), "new": len(new_ids), "queued": len(queue)})
+                         {"queries": queries, "repo_queries": repo_queries, "hits": len(recs), "new": len(new_ids), "queued": len(queue)})
         log.info("search round %d: %d queries, %d hits, %d new papers, %d queued", rounds + 1, len(queries), len(recs), len(new_ids), len(queue))
         return len(new_ids)
 

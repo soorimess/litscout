@@ -92,11 +92,12 @@ def export(store: Store, run_dir: Path) -> Path:
     for r in store.q("SELECT s.*, p.title FROM seeds s JOIN papers p ON p.id = s.id"):
         ws.append([r["name"], r["title"], r["origin"], r["reason"], bool(r["expandable"]), given_up.get(r["id"], "")])
     ws = wb.create_sheet("Run summary")
-    for k in ("run", "topic", "criteria", "null", "thresholds", "validation", "cost_usd", "state", "queries", "crawl_queries"):
+    for k in ("run", "topic", "criteria", "null", "thresholds", "validation", "cost_usd", "state", "queries", "crawl_queries",
+              "repo_queries"):
         ws.append([k, json.dumps(store.meta(k), ensure_ascii=False)])
     wb.save(out_dir / "papers.xlsx")
     summary = {k: store.meta(k) for k in ("run", "topic", "criteria", "null", "thresholds", "validation", "cost_usd", "state",
-                                          "queries", "crawl_queries")}
+                                          "queries", "crawl_queries", "repo_queries")}
     summary["counts"] = {r["segment"] or "unscored": r["n"] for r in store.q("SELECT segment, COUNT(*) AS n FROM papers GROUP BY segment")}
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False))
     return out_dir

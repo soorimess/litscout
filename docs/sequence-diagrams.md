@@ -172,7 +172,7 @@ sequenceDiagram
         CE->>LLM: new keyword queries from confirmed titles and earlier queries
         LLM-->>CE: paper queries + short repository queries
         CE->>SRC: paper queries: OpenAlex, arXiv, Crossref
-        CE->>SRC: repository queries: GitHub (stars >= 10)
+        CE->>SRC: repository queries (first: the topic in 2-4 words): GitHub (stars >= 10)
         SRC-->>CE: records
         CE->>SRC: GitHub repo with an arXiv link in its README -> fetch that paper instead
         CE->>CE: drop repos named like a paper already found (its code)

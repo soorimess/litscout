@@ -152,7 +152,8 @@ Run at every refit, in this order:
    5 per run). They join the centroid, get their own frontier, and everything is rescored.
 5. **Search:** after every 15 new confirmed papers (at most 5 rounds), the LLM writes new keyword
    queries from the confirmed titles and the earlier queries, plus 3 short repository queries for
-   GitHub. OpenAlex, arXiv, Crossref and GitHub are searched; the results are scored and queued like crawl discoveries. This finds recent papers the
+   GitHub (the first is the review topic itself, and repository queries are only checked against
+   earlier repository queries: filtering them against the paper queries had removed the topic itself, the query most likely to find work that exists only as a repository). OpenAlex, arXiv, Crossref and GitHub are searched; the results are scored and queued like crawl discoveries. This finds recent papers the
    citation graph doesn't link yet, and work that exists only as a repository.
 
 ### Distribution Monitor
