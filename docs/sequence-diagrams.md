@@ -170,8 +170,9 @@ sequenceDiagram
     end
     opt 15 new confirmed papers since the last search (max 5 rounds)
         CE->>LLM: new keyword queries from confirmed titles and earlier queries
-        LLM-->>CE: queries
-        CE->>SRC: search OpenAlex, arXiv, Crossref, GitHub
+        LLM-->>CE: paper queries + short repository queries
+        CE->>SRC: paper queries: OpenAlex, arXiv, Crossref
+        CE->>SRC: repository queries: GitHub (stars >= 10)
         SRC-->>CE: records
         CE->>SRC: GitHub repo with an arXiv link in its README -> fetch that paper instead
         CE->>CE: drop repos named like a paper already found (its code)

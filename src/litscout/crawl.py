@@ -35,9 +35,12 @@ find more papers for a systematic literature review.
 {criteria}
 
 You get titles of papers already confirmed as relevant and the queries already used. Return a JSON
-object {{"queries": [...]}} with {k} new short keyword queries (3 to 8 words, no boolean operators or
-quotes) that would find relevant papers the earlier queries missed: other phrasings, sub-topics and
-named artefacts that appear in the confirmed titles."""
+object {{"queries": [...], "repo_queries": [...]}}:
+- "queries": {k} new short keyword queries (3 to 8 words, no boolean operators or quotes) that would
+  find relevant papers the earlier queries missed: other phrasings, sub-topics and named artefacts that
+  appear in the confirmed titles;
+- "repo_queries": 3 new queries of 2 to 4 plain words for GitHub repository search, to find work in the
+  review's scope published as a repository (benchmarks, datasets, leaderboards) rather than a paper."""
 
 
 class Crawler:
@@ -411,7 +414,13 @@ class Crawler:
                                  "Confirmed relevant papers:\n" + "\n".join(f"- {x}" for x in titles) +
                                  "\n\nQueries already used:\n" + "\n".join(f"- {q}" for q in used))
         queries = [q for q in out.get("queries", []) if isinstance(q, str) and q not in used][:k]
-        recs = self._resolve_repos(_search_all(self.src, queries, sc.get("per_query", {"openalex": 25, "arxiv": 25, "crossref": 15})))
+        repo_queries = [q for q in out.get("repo_queries", []) if isinstance(q, str) and q not in used][:3]
+        per_query = dict(sc.get("per_query", {"openalex": 25, "arxiv": 25, "crossref": 15}))
+        gh = per_query.pop("github", 0)
+        hits = _search_all(self.src, queries, per_query)
+        if gh and repo_queries:
+            hits += _search_all(self.src, repo_queries, {"github": gh})
+        recs = self._resolve_repos(hits)
         recs = dedupe(recs)
         self._fill_abstracts(recs)
         new_ids = []
@@ -430,6 +439,7 @@ class Crawler:
         self.store.many("INSERT INTO discoveries VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
         self.store.many("INSERT OR IGNORE INTO frontier (seed_id, paper_id, priority, back, fwd, state) "
                         "VALUES (?, ?, ?, ?, ?, 'queued')", queue)
+        queries = queries + repo_queries
         self.store.set_meta("crawl_queries", self.store.meta("crawl_queries", []) + queries)
         self.store.set_meta("search_rounds", rounds + 1)
         self.store.set_meta("search_last_relevant", n_rel)

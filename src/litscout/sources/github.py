@@ -2,6 +2,7 @@
 without a paper). A repo whose README links an arXiv paper is reported as that paper instead."""
 from __future__ import annotations
 
+import base64
 import re
 from typing import Any, Optional
 
@@ -14,26 +15,27 @@ MD_NOISE = re.compile(r"!\[[^\]]*\]\([^)]*\)|<[^>]+>|\[!\[.*?\]\(.*?\)\]\(.*?\)|
 class GitHub:
     API = "https://api.github.com"
 
-    def __init__(self, token: Optional[str] = None):
+    def __init__(self, token: Optional[str] = None, min_stars: int = 10):
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         # Search allows 10 requests/min without a token and 30 with one; READMEs need the core quota.
         self.http = RateLimitedClient(2.1 if token else 6.5, headers=headers)
         self.readme = bool(token)
+        self.min_stars = min_stars  # filters out personal toy projects
 
     def _readme(self, full: str) -> str:
         d = self.http.get_json(f"{self.API}/repos/{full}/readme")
         if not d or "content" not in d:
             return ""
-        import base64
         try:
             return base64.b64decode(d["content"]).decode("utf-8", "replace")
         except ValueError:
             return ""
 
     def search(self, query: str, n: int) -> list[dict[str, Any]]:
-        d = self.http.get_json(f"{self.API}/search/repositories", params={"q": query, "per_page": n})
+        q = " ".join(query.split()[:4]) + (f" stars:>={self.min_stars}" if self.min_stars else "")
+        d = self.http.get_json(f"{self.API}/search/repositories", params={"q": q, "per_page": n})
         if d is None:
             raise SourceUnavailable(f"GitHub search {query!r}")
         out = []

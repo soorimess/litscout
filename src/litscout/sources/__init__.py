@@ -16,4 +16,4 @@ class Sources:
         self.arxiv = Arxiv(iv("arxiv", 3.1))
         self.dblp = DBLP(iv("dblp", 1.0))
         self.s2 = SemanticScholar(s.s2_api_key)
-        self.github = GitHub(s.github_token)
+        self.github = GitHub(s.github_token, int(s.t("sources", "github", "min_stars", default=10)))

@@ -75,7 +75,7 @@ rate limiting and retries with backoff. A failed expansion is retried up to 3 ti
 | arXiv | search, abstracts for preprints | free, about 1 request / 3 s |
 | Crossref | search | free, polite pool with contact email |
 | Semantic Scholar | references and citations when OpenAlex has none (common for recent arXiv preprints) | free but slow without `S2_API_KEY` |
-| GitHub | repository search during the crawl's keyword searches: benchmarks published as a repo, blog or leaderboard without a paper | 10 searches/min without `GITHUB_TOKEN`, 30 with; READMEs only with a token |
+| GitHub | repository search during the crawl's keyword searches: benchmarks published as a repo, blog or leaderboard without a paper. Own short queries (2–4 words) and `stars:>=10`, because long paper-style queries return nothing and unfiltered hits are personal toy projects | 10 searches/min without `GITHUB_TOKEN`, 30 with; READMEs only with a token |
 | DBLP | disabled by default: the API answers scripts with an anti-bot page | — |
 
 Records are merged by OpenAlex id, DOI, arXiv id and normalised title. Unresolved reference strings and
@@ -148,8 +148,8 @@ Run at every refit, in this order:
 4. **Promote seeds:** papers with LLM score ≥ 9 and score ≥ `τ_rel` become seeds (at most 2 per refit,
    5 per run). They join the centroid, get their own frontier, and everything is rescored.
 5. **Search:** after every 15 new confirmed papers (at most 5 rounds), the LLM writes new keyword
-   queries from the confirmed titles and the earlier queries. OpenAlex, arXiv, Crossref and GitHub are
-   searched; the results are scored and queued like crawl discoveries. This finds recent papers the
+   queries from the confirmed titles and the earlier queries, plus 3 short repository queries for
+   GitHub. OpenAlex, arXiv, Crossref and GitHub are searched; the results are scored and queued like crawl discoveries. This finds recent papers the
    citation graph doesn't link yet, and work that exists only as a repository.
 
 ### Distribution Monitor
