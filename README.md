@@ -91,3 +91,7 @@ litscout report <run>           # re-export the tables
 
 Each run lives in `runs/<run>/`: `store.sqlite` (all state, so runs resume), `metrics.json`
 (dashboard data), `index.html` (dashboard) and `output/`.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

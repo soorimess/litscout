@@ -7,6 +7,7 @@ name = "litscout"
 version = "0.1.0"
 description = "Systematic literature review: seed finding, embedding-ranked snowballing with live stopping rules, LLM validation"
 requires-python = ">=3.9"
+license = { text = "MIT" }
 dependencies = [
   "requests>=2.31",
   "pyyaml>=6.0",
